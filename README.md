@@ -1,21 +1,76 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# LeadFlow CRM
 
-# Run and deploy your AI Studio app
+A full-stack CRM application with **separated frontend and backend**.
 
-This contains everything you need to run your app locally.
+## Project Structure
 
-View your app in AI Studio: https://ai.studio/apps/9a6b9569-34a1-43f7-9e7d-be3c45a3d677
+```
+leadflow/
+├── backend/          ← Express API + PostgreSQL
+│   ├── server.ts     ← Main API server
+│   ├── .env          ← DB connection string & secrets
+│   ├── package.json
+│   └── tsconfig.json
+│
+└── frontend/         ← React + Vite SPA
+    ├── src/          ← React components, pages, context
+    ├── index.html
+    ├── .env          ← VITE_API_URL (for production)
+    ├── vite.config.ts ← Dev proxy: /api → localhost:3001
+    └── package.json
+```
 
-## Run Locally
+## Getting Started
 
-**Prerequisites:**  Node.js
+### 1. Start the Backend
 
+```bash
+cd backend
+npm install
+npm run dev
+# → Runs on http://localhost:3001
+# → Connects to remote PostgreSQL automatically
+```
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
-# leadflow
+### 2. Start the Frontend (in a new terminal)
+
+```bash
+cd frontend
+npm install
+npm run dev
+# → Runs on http://localhost:5173
+# → Vite dev proxy sends /api requests to the backend
+```
+
+## Environment Variables
+
+### Backend (`backend/.env`)
+| Variable | Description |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `JWT_SECRET` | Secret for JWT signing |
+| `PORT` | API server port (default: 3001) |
+| `FRONTEND_URL` | Allowed CORS origin |
+
+### Frontend (`frontend/.env`)
+| Variable | Description |
+|---|---|
+| `VITE_API_URL` | Backend URL for **production** builds only |
+
+> In **development**, Vite proxies `/api` calls to `http://localhost:3001` automatically — no CORS issues.
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/health` | Health check |
+| GET | `/api/leads` | List leads (paginated, filterable) |
+| POST | `/api/leads/import` | Bulk import leads |
+| GET | `/api/leads/:id` | Get single lead |
+| PUT | `/api/leads/:id` | Update lead |
+| DELETE | `/api/leads/:id` | Delete lead |
+| GET | `/api/leads/:id/calls` | Get call logs for lead |
+| POST | `/api/calls` | Log a new call |
+| GET | `/api/dashboard/stats` | Dashboard statistics |
+| POST | `/api/auth/register` | Register user |
+| POST | `/api/auth/login` | Login user |

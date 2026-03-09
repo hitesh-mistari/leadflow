@@ -1,0 +1,86 @@
+[
+  {
+    "column_name": "id",
+    "data_type": "integer"
+  },
+  {
+    "column_name": "place_id",
+    "data_type": "text"
+  },
+  {
+    "column_name": "name",
+    "data_type": "text"
+  },
+  {
+    "column_name": "phone",
+    "data_type": "text"
+  },
+  {
+    "column_name": "website",
+    "data_type": "text"
+  },
+  {
+    "column_name": "rating",
+    "data_type": "real"
+  },
+  {
+    "column_name": "reviews",
+    "data_type": "integer"
+  },
+  {
+    "column_name": "description",
+    "data_type": "text"
+  },
+  {
+    "column_name": "address",
+    "data_type": "text"
+  },
+  {
+    "column_name": "latitude",
+    "data_type": "real"
+  },
+  {
+    "column_name": "longitude",
+    "data_type": "real"
+  },
+  {
+    "column_name": "main_category",
+    "data_type": "text"
+  },
+  {
+    "column_name": "categories",
+    "data_type": "text"
+  },
+  {
+    "column_name": "workday_timing",
+    "data_type": "text"
+  },
+  {
+    "column_name": "is_temporarily_closed",
+    "data_type": "integer"
+  },
+  {
+    "column_name": "status",
+    "data_type": "text"
+  },
+  {
+    "column_name": "notes",
+    "data_type": "text"
+  },
+  {
+    "column_name": "last_called",
+    "data_type": "timestamp without time zone"
+  },
+  {
+    "column_name": "next_followup",
+    "data_type": "timestamp without time zone"
+  },
+  {
+    "column_name": "call_attempts",
+    "data_type": "integer"
+  },
+  {
+    "column_name": "created_at",
+    "data_type": "timestamp without time zone"
+  }
+]
