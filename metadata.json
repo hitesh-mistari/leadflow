@@ -1,0 +1,5 @@
+{
+  "name": "LeadFlow CRM",
+  "description": "A production-ready Cold Calling CRM for managing leads, tracking calls, and analyzing sales performance.",
+  "requestFramePermissions": ["microphone"]
+}
