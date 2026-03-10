@@ -96,8 +96,8 @@ const initDB = async () => {
         console.log('✅ import_history schema verified');
         console.log('✅ import_history table ready');
 
-        // Safe: seed default admin if no users exist at all
-        const { rows: userCount } = await client.query('SELECT COUNT(*) as count FROM users');
+        // Safe: seed default admin if admin user doesn't exist
+        const { rows: userCount } = await client.query("SELECT COUNT(*) as count FROM users WHERE email = 'admin@leadflow.com'");
         if (parseInt(userCount[0].count) === 0) {
             console.log('👤 No users found — creating default admin account...');
             const DEFAULT_USERS = [
