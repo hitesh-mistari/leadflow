@@ -102,11 +102,6 @@ export default function Login() {
           <p className="text-slate-400 text-xs mb-2">
             Access restricted to authorized users only.
           </p>
-          <div className="inline-block bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-xs text-indigo-800 text-left">
-            <strong>Demo Credentials:</strong><br />
-            Email: <code className="bg-white px-1 py-0.5 rounded">admin@leadflow.com</code><br />
-            Password: <code className="bg-white px-1 py-0.5 rounded">Admin@123</code> <span className="text-indigo-400 ml-1">(Case sensitive)</span>
-          </div>
         </div>
       </div>
     </div>
