@@ -19,7 +19,11 @@ export default function Login() {
       await login(email, password);
       navigate('/');
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Invalid email or password');
+      if (!err.response) {
+        setError('Cannot connect to server. Please check if the backend is running.');
+      } else {
+        setError(err.response.data?.error || 'Invalid email or password');
+      }
     } finally {
       setLoading(false);
     }

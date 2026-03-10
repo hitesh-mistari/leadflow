@@ -218,6 +218,7 @@ app.post('/api/auth/login', async (req, res) => {
         return res.status(400).json({ error: 'Email and password are required' });
 
     try {
+        console.log(`🔑 Login attempt for: ${email}`);
         // Look up user in the remote database
         const { rows } = await pool.query(
             'SELECT * FROM users WHERE email = $1',
