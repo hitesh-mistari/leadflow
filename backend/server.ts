@@ -96,11 +96,30 @@ const initDB = async () => {
         console.log('✅ import_history schema verified');
         console.log('✅ import_history table ready');
 
+        // Safe: seed default admin if no users exist at all
+        const { rows: userCount } = await client.query('SELECT COUNT(*) as count FROM users');
+        if (parseInt(userCount[0].count) === 0) {
+            console.log('👤 No users found — creating default admin account...');
+            const DEFAULT_USERS = [
+                { name: 'Admin', email: 'admin@leadflow.com', password: 'Admin@123' },
+                { name: 'Ravi Kumar', email: 'ravi@leadflow.com', password: 'Ravi@123' },
+            ];
+            for (const u of DEFAULT_USERS) {
+                const hashed = await bcrypt.hash(u.password, 10);
+                await client.query(
+                    `INSERT INTO users (name, email, password) VALUES ($1, $2, $3) ON CONFLICT (email) DO NOTHING`,
+                    [u.name, u.email.toLowerCase(), hashed]
+                );
+            }
+            console.log('✅ Default users created: admin@leadflow.com / Admin@123');
+        }
+
         await seedDatabase(client);
     } finally {
         client.release();
     }
 };
+
 
 // ─── Seed Demo Data ───────────────────────────────────────────────────────────
 const seedDatabase = async (client: pkg.PoolClient) => {
