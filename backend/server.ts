@@ -5,17 +5,7 @@ import pkg from 'pg';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 
-// ─── Hardcoded Users ──────────────────────────────────────────────────────────
-// These 5 users are the ONLY people who can log in.
-// They are seeded into the remote PostgreSQL database on every server startup,
-// so you can see them in pgAdmin too.
-const HARDCODED_USERS = [
-    { name: 'Admin', email: 'admin@leadflow.com', password: 'Admin@123' },
-    { name: 'Ravi', email: 'ravi@leadflow.com', password: 'Ravi@123' },
-    { name: 'Priya', email: 'priya@leadflow.com', password: 'Priya@123' },
-    { name: 'Arjun', email: 'arjun@leadflow.com', password: 'Arjun@123' },
-    { name: 'Sneha', email: 'sneha@leadflow.com', password: 'Sneha@123' },
-];
+
 
 const { Pool } = pkg;
 
@@ -106,28 +96,10 @@ const initDB = async () => {
         console.log('✅ import_history schema verified');
         console.log('✅ import_history table ready');
 
-        await seedUsers(client);
         await seedDatabase(client);
     } finally {
         client.release();
     }
-};
-
-// ─── Seed Hardcoded Users into PostgreSQL ─────────────────────────────────────
-// Runs on every startup. Uses ON CONFLICT DO NOTHING so it's safe to re-run.
-// The 5 users will always be visible in pgAdmin / remote DB.
-const seedUsers = async (client: pkg.PoolClient) => {
-    console.log('👤 Syncing hardcoded users to database...');
-    for (const user of HARDCODED_USERS) {
-        const hashed = await bcrypt.hash(user.password, 10);
-        await client.query(
-            `INSERT INTO users (name, email, password)
-             VALUES ($1, $2, $3)
-             ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, password = EXCLUDED.password`,
-            [user.name, user.email, hashed]
-        );
-    }
-    console.log('✅ Users synced to database:', HARDCODED_USERS.map(u => u.email).join(', '));
 };
 
 // ─── Seed Demo Data ───────────────────────────────────────────────────────────
@@ -190,6 +162,17 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '500mb' }));
 
+// Add X-Robots-Tag to deter indexing
+app.use((_req, res, next) => {
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    next();
+});
+
+app.get('/robots.txt', (_req, res) => {
+    res.type('text/plain');
+    res.send('User-agent: *\nDisallow: /');
+});
+
 // ─── Auth Middleware ───────────────────────────────────────────────────────────
 const authenticateToken = (req: any, res: any, next: any) => {
     const authHeader = req.headers['authorization'];
@@ -212,7 +195,7 @@ app.get('/api/health', (_req, res) => {
 // ─── Auth Routes ─────────────────────────────────────────────────────────────
 // Login: verifies against the hardcoded users stored in the remote PostgreSQL DB.
 // Only the 5 seeded users can ever log in.
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', async (req: any, res: any) => {
     const { email, password } = req.body;
     if (!email || !password)
         return res.status(400).json({ error: 'Email and password are required' });
@@ -227,20 +210,22 @@ app.post('/api/auth/login', async (req, res) => {
         const user = rows[0];
 
         if (!user) {
+            console.log(`Failed: User not found for email: ${email}`);
             return res.status(401).json({ error: 'Invalid email or password' });
         }
 
         // Compare entered password against bcrypt hash stored in DB
         const isValid = await bcrypt.compare(password, user.password);
         if (!isValid) {
+            console.log(`Failed: Password mismatch for ${email}. Entered password: ${password}. Db Hash: ${user.password}`);
             return res.status(401).json({ error: 'Invalid email or password' });
         }
 
         // Issue JWT
         const token = jwt.sign(
             { id: user.id, email: user.email, name: user.name },
-            JWT_SECRET,
-            { expiresIn: '8h' }
+            process.env.JWT_SECRET || 'fallback_secret',
+            { expiresIn: '7d' }
         );
         res.json({ token, user: { id: user.id, email: user.email, name: user.name } });
     } catch (err) {
@@ -249,43 +234,185 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
+app.post('/api/auth/register', async (req: any, res: any) => {
+    const { name, email, password } = req.body;
+
+    if (!name || !email || !password) {
+        return res.status(400).json({ error: 'All fields are required' });
+    }
+
+    try {
+        const emailLower = email.toLowerCase().trim();
+        const { rows: existing } = await pool.query('SELECT * FROM users WHERE email = $1', [emailLower]);
+
+        if (existing.length > 0) {
+            return res.status(400).json({ error: 'Email already registered' });
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        const { rows } = await pool.query(
+            'INSERT INTO users (name, email, password) VALUES ($1, $2, $3) RETURNING id, name, email',
+            [name, emailLower, hashedPassword]
+        );
+
+        const user = rows[0];
+
+        const token = jwt.sign(
+            { id: user.id, email: user.email, name: user.name },
+            process.env.JWT_SECRET || 'fallback_secret',
+            { expiresIn: '7d' }
+        );
+
+        res.status(201).json({ token, user });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error during registration' });
+    }
+});
+
 // Get current user info from token
 app.get('/api/auth/me', authenticateToken, (req: any, res) => {
     res.json({ user: req.user });
 });
 
+// ─── Pipeline Stages Routes ────────────────────────────────────────────────────
+app.get('/api/stages', authenticateToken, async (req, res) => {
+    try {
+        const { rows } = await pool.query('SELECT * FROM pipeline_stages ORDER BY position ASC');
+        res.json(rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error fetching stages' });
+    }
+});
+
+app.post('/api/stages', authenticateToken, async (req, res) => {
+    try {
+        const { name, label, color = 'slate' } = req.body;
+
+        // Find highest position
+        const { rows: posRows } = await pool.query('SELECT MAX(position) as max_pos FROM pipeline_stages');
+        const nextPos = (posRows[0].max_pos || 0) + 1;
+
+        const { rows } = await pool.query(
+            'INSERT INTO pipeline_stages (name, label, color, position) VALUES ($1, $2, $3, $4) RETURNING *',
+            [name, label, color, nextPos]
+        );
+        res.status(201).json(rows[0]);
+    } catch (err: any) {
+        console.error(err);
+        if (err.code === '23505') { // Unique constraint violation
+            return res.status(400).json({ error: 'A stage with this exact programmatic name already exists' });
+        }
+        res.status(500).json({ error: 'Failed to create stage' });
+    }
+});
+
 // ─── Lead Routes ───────────────────────────────────────────────────────────────
+// Get Leads (paginated / filtered)
 app.get('/api/leads', authenticateToken, async (req, res) => {
-    const { status, search, page = 1, limit = 20, sort = 'id', order = 'DESC' } = req.query;
-    const offset = (Number(page) - 1) * Number(limit);
-    const params: any[] = [];
-    let conditions = '1=1';
-    let idx = 1;
+    try {
+        const { page = 1, limit = 10, search, status } = req.query;
+        const offset = (Number(page) - 1) * Number(limit);
 
-    if (status) {
-        conditions += ` AND status = $${idx++}`;
-        params.push(status);
+        let query = 'SELECT * FROM leads WHERE 1=1';
+        let countQuery = 'SELECT COUNT(*) FROM leads WHERE 1=1';
+        const params: any[] = [];
+        let paramIndex = 1;
+
+        if (status) {
+            query += ` AND status = $${paramIndex}`;
+            countQuery += ` AND status = $${paramIndex}`;
+            params.push(status);
+            paramIndex++;
+        }
+
+        if (search) {
+            query += ` AND (name ILIKE $${paramIndex} OR phone ILIKE $${paramIndex} OR address ILIKE $${paramIndex})`;
+            countQuery += ` AND (name ILIKE $${paramIndex} OR phone ILIKE $${paramIndex} OR address ILIKE $${paramIndex})`;
+            params.push(`%${search}%`);
+            paramIndex++;
+        }
+
+        query += ` ORDER BY created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+        const queryParams = [...params, limit, offset];
+
+        const [leadsRes, countRes] = await Promise.all([
+            pool.query(query, queryParams),
+            pool.query(countQuery, params)
+        ]);
+
+        res.json({
+            leads: leadsRes.rows,
+            total: parseInt(countRes.rows[0].count),
+            page: Number(page),
+            totalPages: Math.ceil(parseInt(countRes.rows[0].count) / Number(limit))
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
     }
-    if (search) {
-        conditions += ` AND (name ILIKE $${idx} OR phone ILIKE $${idx} OR main_category ILIKE $${idx})`;
-        params.push(`%${search}%`);
-        idx++;
+});
+
+// Export Leads
+app.get('/api/leads/export', authenticateToken, async (req, res) => {
+    try {
+        const { search, status, format = 'csv' } = req.query;
+
+        let query = 'SELECT name, phone, email, status, rating, reviews, main_category, address, website, created_at, notes FROM leads WHERE 1=1';
+        const params: any[] = [];
+        let paramIndex = 1;
+
+        if (status) {
+            query += ` AND status = $${paramIndex}`;
+            params.push(status);
+            paramIndex++;
+        }
+
+        if (search) {
+            query += ` AND (name ILIKE $${paramIndex} OR phone ILIKE $${paramIndex} OR address ILIKE $${paramIndex})`;
+            params.push(`%${search}%`);
+            paramIndex++;
+        }
+
+        query += ` ORDER BY created_at DESC`;
+
+        const { rows } = await pool.query(query, params);
+
+        if (format === 'json') {
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Content-Disposition', 'attachment; filename="leads_export.json"');
+            return res.status(200).send(JSON.stringify(rows, null, 2));
+        }
+
+        // CSV Format
+        if (rows.length === 0) {
+            return res.status(200).send('No records found');
+        }
+
+        const headers = Object.keys(rows[0]).join(',');
+        const csvRows = rows.map(row =>
+            Object.values(row).map(val => {
+                const str = String(val || '');
+                // Escape quotes and wrap in quotes if there's a comma
+                if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+                    return `"${str.replace(/"/g, '""')}"`;
+                }
+                return str;
+            }).join(',')
+        );
+
+        const csvContent = [headers, ...csvRows].join('\n');
+
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename="leads_export.csv"');
+        return res.status(200).send(csvContent);
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error during export' });
     }
-
-    const allowedSorts = ['id', 'name', 'rating', 'status', 'created_at', 'last_called', 'call_attempts'];
-    const safeSort = allowedSorts.includes(sort as string) ? sort : 'id';
-    const safeOrder = (order as string).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
-
-    const countResult = await pool.query(`SELECT COUNT(*) as count FROM leads WHERE ${conditions}`, params);
-    const total = parseInt(countResult.rows[0].count);
-
-    const queryParams = [...params, Number(limit), offset];
-    const leads = await pool.query(
-        `SELECT * FROM leads WHERE ${conditions} ORDER BY ${safeSort} ${safeOrder} LIMIT $${idx++} OFFSET $${idx++}`,
-        queryParams
-    );
-
-    res.json({ leads: leads.rows, total, page: Number(page), limit: Number(limit) });
 });
 
 app.post('/api/leads/import', authenticateToken, async (req: any, res) => {
@@ -511,6 +638,34 @@ app.get('/api/leads/:id/calls', authenticateToken, async (req, res) => {
         [req.params.id]
     );
     res.json(rows);
+});
+
+// ─── Task Routes ─────────────────────────────────────────────────────────────
+app.get('/api/leads/:id/tasks', authenticateToken, async (req, res) => {
+    try {
+        const { rows } = await pool.query(
+            'SELECT * FROM tasks WHERE lead_id = $1 ORDER BY scheduled_at ASC',
+            [req.params.id]
+        );
+        res.json(rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error fetching tasks' });
+    }
+});
+
+app.post('/api/leads/:id/tasks', authenticateToken, async (req, res) => {
+    try {
+        const { scheduled_at, status = 'pending', type = 'call' } = req.body;
+        const { rows } = await pool.query(
+            'INSERT INTO tasks (lead_id, scheduled_at, status, type) VALUES ($1, $2, $3, $4) RETURNING *',
+            [req.params.id, scheduled_at, status, type]
+        );
+        res.status(201).json(rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error creating task' });
+    }
 });
 
 // ─── Dashboard Stats ───────────────────────────────────────────────────────────

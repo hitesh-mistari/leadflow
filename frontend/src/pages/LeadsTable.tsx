@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useSearch } from '../context/SearchContext';
+import AddLeadModal from '../components/modals/AddLeadModal';
 
 // ─── Voice Remark Modal ──────────────────────────────────────────────────────
 const LANG_OPTIONS = [
@@ -460,6 +461,7 @@ export default function LeadsTable() {
   const [remarkLead, setRemarkLead] = useState<any>(null);
   const [importHistory, setImportHistory] = useState<any[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
   const [importResult, setImportResult] = useState<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -574,20 +576,33 @@ export default function LeadsTable() {
     }
   };
 
-  const exportData = (format: 'json' | 'csv') => {
-    if (format === 'json') {
-      const blob = new Blob([JSON.stringify(leads, null, 2)], { type: 'application/json' });
+  const exportData = async (format: 'json' | 'csv') => {
+    try {
+      // Get the token from AuthContext's localStorage
+      const token = localStorage.getItem('token');
+      const queryParams = new URLSearchParams({ format });
+      if (searchQuery) queryParams.append('search', searchQuery);
+      if (statusFilter) queryParams.append('status', statusFilter);
+
+      const response = await fetch(`/api/leads/export?${queryParams.toString()}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) throw new Error('Export failed');
+
+      const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = 'leads.json'; a.click();
-    } else {
-      const headers = ['Name', 'Phone', 'Status', 'Rating', 'Category', 'Address'];
-      const rows = leads.map(l => [l.name, l.phone, l.status, l.rating, l.main_category, l.address]);
-      const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
-      const blob = new Blob([csvContent], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = 'leads.csv'; a.click();
+      a.href = url;
+      a.download = `leads_export.${format}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to export data');
     }
   };
 
@@ -620,7 +635,7 @@ export default function LeadsTable() {
               <button onClick={() => exportData('json')} className="w-full text-left px-4 py-2 hover:bg-slate-50 text-sm border-t border-slate-100">Export JSON</button>
             </div>
           </div>
-          <button className="btn btn-primary"><Plus size={18} className="mr-2" />Add Lead</button>
+          <button onClick={() => setShowAddModal(true)} className="btn btn-primary"><Plus size={18} className="mr-2" />Add Lead</button>
         </div>
       </div>
 
@@ -655,6 +670,16 @@ export default function LeadsTable() {
             <X size={16} />
           </button>
         </div>
+      )}
+
+      {showAddModal && (
+        <AddLeadModal
+          onClose={() => setShowAddModal(false)}
+          onSuccess={() => {
+            fetchLeads();
+            setShowAddModal(false);
+          }}
+        />
       )}
 
       {/* Import History Panel */}

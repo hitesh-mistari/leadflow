@@ -1,76 +1,38 @@
-# LeadFlow CRM
+# LeadFlow CRM - Current State Evaluation
 
-A full-stack CRM application with **separated frontend and backend**.
+This document outlines the current status of the CRM, specifically evaluating what is currently fully functional, what works partially, and what is pending implementation.
 
-## Project Structure
+## 1. JSON Upload Functionality
+✅ **STATUS: WORKING & ROBUST**
 
-```
-leadflow/
-├── backend/          ← Express API + PostgreSQL
-│   ├── server.ts     ← Main API server
-│   ├── .env          ← DB connection string & secrets
-│   ├── package.json
-│   └── tsconfig.json
-│
-└── frontend/         ← React + Vite SPA
-    ├── src/          ← React components, pages, context
-    ├── index.html
-    ├── .env          ← VITE_API_URL (for production)
-    ├── vite.config.ts ← Dev proxy: /api → localhost:3001
-    └── package.json
-```
+I have thoroughly checked the JSON upload mechanism both on the frontend (`LeadsTable.tsx`) and the backend (`server.ts`). 
+- **Frontend**: It efficiently reads the file using a `FileReader` and uses smart heuristics to find the array of leads, whether the JSON is a raw array `[...]` or wrapped in an object like `{ "leads": [...] }` or `{ "data": [...] }`.
+- **Backend**: The `/api/leads/import` endpoint maps fields dynamically using a `getVal` helper function, checking multiple possible spellings of fields (e.g., `phone`, `phoneNumber`, `contact`). It successfully skips invalid records, inserts into PostgreSQL, and handles duplicates using `ON CONFLICT DO UPDATE`.
+- **Result**: The JSON upload is highly flexible and works correctly.
 
-## Getting Started
+## 2. Fully Functional Features
+- **Dashboard Statistics**: The `/api/dashboard/stats` endpoint accurately aggregates data, and the dashboard renders Recharts (Pie and Line charts) correctly based on real PostgreSQL data.
+- **Pipeline Kanban**: Dragging and dropping cards between columns successfully updates the lead's status in the database.
+- **Authentication (Backend Proxy)**: The Vite proxy correctly forwards `/api` requests to the Node backend. JWT token generation and validation work perfectly.
+- **Call Logging & Voice Remarks**: The `LeadDetails.tsx` page correctly interfaces with the Web Speech API for voice-to-text dictation and logs call durations to the database.
+- **WhatsApp Integration**: The WhatsApp buttons correctly format Indian numbers and open `wa.me` links securely.
 
-### 1. Start the Backend
+## 3. Pending / Incomplete Features
 
-```bash
-cd backend
-npm install
-npm run dev
-# → Runs on http://localhost:3001
-# → Connects to remote PostgreSQL automatically
-```
+While the core display and pipeline movement work, several functional "action" buttons in the UI are currently just visual placeholders without underlying logic:
 
-### 2. Start the Frontend (in a new terminal)
+### High Priority Pending
+1. **Manual "Add Lead"**: The `+ Add Lead` button on the Leads Table is visually present but has no `onClick` handler. You currently cannot add a lead manually without a JSON import.
+2. **True Data Export**: The Export (CSV/JSON) feature relies solely on the frontend table state. Because the table is paginated to 10 rows per page, exporting currently **only exports the 10 rows you are looking at**. It needs a backend endpoint to export the full dataset.
+3. **User Registration & Auth**: The login works, but it strictly relies on 5 hardcoded users explicitly defined in the `server.ts` file. Real user registration logic and password creation are missing.
 
-```bash
-cd frontend
-npm install
-npm run dev
-# → Runs on http://localhost:5173
-# → Vite dev proxy sends /api requests to the backend
-```
+### Medium Priority Pending
+4. **"Schedule Call" Action**: On the `LeadDetails.tsx` page, the datetime picker and "Schedule Call" button do not trigger any database updates.
+5. **Kanban Customization**: The "Add New Stage" and column `+` buttons on the Kanban board have no click handlers. Pipeline stages are currently hardcoded.
+6. **Lead Quick Edit**: While you can update a lead's status and notes, there is no easy mechanism to edit their core profile details (like fixing a typo in their name or phone number).
 
-## Environment Variables
-
-### Backend (`backend/.env`)
-| Variable | Description |
-|---|---|
-| `DATABASE_URL` | PostgreSQL connection string |
-| `JWT_SECRET` | Secret for JWT signing |
-| `PORT` | API server port (default: 3001) |
-| `FRONTEND_URL` | Allowed CORS origin |
-
-### Frontend (`frontend/.env`)
-| Variable | Description |
-|---|---|
-| `VITE_API_URL` | Backend URL for **production** builds only |
-
-> In **development**, Vite proxies `/api` calls to `http://localhost:3001` automatically — no CORS issues.
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/api/health` | Health check |
-| GET | `/api/leads` | List leads (paginated, filterable) |
-| POST | `/api/leads/import` | Bulk import leads |
-| GET | `/api/leads/:id` | Get single lead |
-| PUT | `/api/leads/:id` | Update lead |
-| DELETE | `/api/leads/:id` | Delete lead |
-| GET | `/api/leads/:id/calls` | Get call logs for lead |
-| POST | `/api/calls` | Log a new call |
-| GET | `/api/dashboard/stats` | Dashboard statistics |
-| POST | `/api/auth/register` | Register user |
-| POST | `/api/auth/login` | Login user |
+## Next Steps
+If you would like me to start implementing these pending features, I suggest we tackle them in this order:
+1. Wire up the **Add Lead** modal.
+2. Build a true **Backend Data Export** endpoint.
+3. Implement real **User Registration**.

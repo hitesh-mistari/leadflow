@@ -24,8 +24,10 @@ import {
   Mic,
   MicOff,
   X,
-  AlertTriangle
+  AlertTriangle,
+  Edit
 } from 'lucide-react';
+import EditLeadModal from '../components/modals/EditLeadModal';
 
 // ─── WhatsApp helpers (same as LeadsTable) ────────────────────────────────────
 const WhatsAppIcon = ({ size = 18 }: { size?: number }) => (
@@ -137,15 +139,7 @@ const WAButtonInline = ({ phone, name }: { phone: string; name: string }) => {
   );
 };
 
-const STATUS_OPTIONS = [
-  'not_called',
-  'called_no_response',
-  'follow_up',
-  'interested',
-  'converted',
-  'not_interested',
-  'closed'
-];
+
 
 export default function LeadDetails() {
   const { id } = useParams();
@@ -160,8 +154,10 @@ export default function LeadDetails() {
   const [callDuration, setCallDuration] = useState(0);
   const [timerInterval, setTimerInterval] = useState<any>(null);
   const [showOutcomeModal, setShowOutcomeModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [callRemark, setCallRemark] = useState('');
   const [isListening, setIsListening] = useState(false);
+  const [stages, setStages] = useState<any[]>([]);
 
   useEffect(() => {
     const fetchLead = async () => {
@@ -171,8 +167,12 @@ export default function LeadDetails() {
         setNotes(data.notes || '');
         setStatus(data.status);
 
-        const callsRes = await api.get(`/leads/${id}/calls`);
+        const [callsRes, stagesRes] = await Promise.all([
+          api.get(`/leads/${id}/calls`),
+          api.get('/stages')
+        ]);
         setCallHistory(callsRes.data);
+        setStages(stagesRes.data);
       } catch (err) {
         console.error(err);
         navigate('/leads');
@@ -318,8 +318,8 @@ export default function LeadDetails() {
               {formatDuration(callDuration)}
             </button>
           )}
-          <button onClick={handleSave} disabled={saving} className="btn btn-primary flex-1 sm:flex-none">
-            {saving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
+          <button onClick={() => setShowEditModal(true)} className="btn btn-secondary flex-1 sm:flex-none">
+            <Edit size={18} />
           </button>
         </div>
       </div>
@@ -352,13 +352,13 @@ export default function LeadDetails() {
 
             <p className="text-sm font-bold text-slate-700 mb-3">Select Outcome</p>
             <div className="grid grid-cols-2 gap-3">
-              {STATUS_OPTIONS.map(outcome => (
+              {stages.map(stage => (
                 <button
-                  key={outcome}
-                  onClick={() => logCall(outcome)}
+                  key={stage.name}
+                  onClick={() => logCall(stage.name)}
                   className="px-4 py-3 rounded-xl border border-slate-200 hover:border-indigo-600 hover:bg-indigo-50 text-sm font-medium capitalize transition-all"
                 >
-                  {outcome.replace('_', ' ')}
+                  {stage.label}
                 </button>
               ))}
             </div>
@@ -370,6 +370,16 @@ export default function LeadDetails() {
             </button>
           </div>
         </div>
+      )}
+
+      {showEditModal && (
+        <EditLeadModal
+          lead={lead}
+          onClose={() => setShowEditModal(false)}
+          onSuccess={(updatedLead) => {
+            setLead(updatedLead);
+          }}
+        />
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -480,10 +490,20 @@ export default function LeadDetails() {
           </div>
 
           <div className="card p-8">
-            <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
-              <FileText className="text-indigo-600" size={20} />
-              Notes
-            </h3>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                <FileText className="text-indigo-600" size={20} />
+                Notes
+              </h3>
+              <button
+                onClick={handleSave}
+                disabled={saving || notes === lead.notes}
+                className="btn btn-primary btn-sm py-1.5 px-3 text-xs"
+              >
+                {saving ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} className="mr-1" />}
+                {notes === lead.notes ? 'Saved' : 'Save Notes'}
+              </button>
+            </div>
             <textarea
               className="input min-h-[200px] resize-none p-4"
               placeholder="Add your notes from the call here..."
@@ -502,17 +522,17 @@ export default function LeadDetails() {
           <div className="card p-8">
             <h3 className="text-lg font-bold text-slate-900 mb-6">Pipeline Status</h3>
             <div className="space-y-3">
-              {STATUS_OPTIONS.map((s) => (
+              {stages.map((stg) => (
                 <button
-                  key={s}
-                  onClick={() => setStatus(s)}
-                  className={`w-full flex items-center justify-between p-4 rounded-xl border-2 transition-all ${status === s
+                  key={stg.name}
+                  onClick={() => setStatus(stg.name)}
+                  className={`w-full flex items-center justify-between p-4 rounded-xl border-2 transition-all ${status === stg.name
                     ? 'border-indigo-600 bg-indigo-50 text-indigo-700 font-bold'
                     : 'border-slate-100 hover:border-slate-200 text-slate-600'
                     }`}
                 >
-                  <span className="capitalize">{s.replace('_', ' ')}</span>
-                  {status === s && <CheckCircle2 size={18} />}
+                  <span className="capitalize">{stg.label}</span>
+                  {status === stg.name && <CheckCircle2 size={18} />}
                 </button>
               ))}
             </div>
@@ -558,6 +578,6 @@ export default function LeadDetails() {
           </div>
         </div>
       </div>
-    </div>
+    </div >
   );
 }
