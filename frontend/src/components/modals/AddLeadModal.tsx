@@ -14,6 +14,7 @@ export default function AddLeadModal({ onClose, onSuccess }: AddLeadModalProps) 
     const [formData, setFormData] = useState({
         name: '',
         phone: '',
+        email: '',
         address: '',
         categories: '',
         main_category: '',
@@ -22,7 +23,8 @@ export default function AddLeadModal({ onClose, onSuccess }: AddLeadModalProps) 
         reviews: '',
         workday_timing: '',
         description: '',
-        status: 'not_called'
+        status: 'not_called',
+        tags: ''
     });
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -43,6 +45,7 @@ export default function AddLeadModal({ onClose, onSuccess }: AddLeadModalProps) 
                 leads: [{
                     "Business Name": formData.name,
                     "Contact": formData.phone,
+                    "Email": formData.email,
                     "Address": formData.address,
                     "Categories": formData.categories,
                     "Main Category": formData.main_category,
@@ -99,6 +102,17 @@ export default function AddLeadModal({ onClose, onSuccess }: AddLeadModalProps) 
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Phone Number *</label>
                                 <input required type="text" name="phone" value={formData.phone} onChange={handleChange} className="input w-full" placeholder="e.g. +91 98765 43210" />
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Email Address</label>
+                                <input type="email" name="email" value={formData.email} onChange={handleChange} className="input w-full" placeholder="e.g. contact@company.com" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Website</label>
+                                <input type="url" name="website" value={formData.website} onChange={handleChange} className="input w-full" placeholder="https://" />
                             </div>
                         </div>
 

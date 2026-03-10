@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SearchProvider, useSearch } from './context/SearchContext';
+import { ToastProvider } from './context/ToastContext';
 import {
   LayoutDashboard,
   Users,
@@ -18,8 +19,8 @@ import LeadsTable from './pages/LeadsTable';
 import Kanban from './pages/Kanban';
 import LeadDetails from './pages/LeadDetails';
 import Login from './pages/Login';
+import Register from './pages/Register';
 
-// Guard: redirects to /login if not authenticated
 const PrivateRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, loading } = useAuth();
   if (loading) {
@@ -38,13 +39,11 @@ interface NavItemProps {
   icon: any;
   label: string;
   active: boolean;
-  onClick?: () => void;
 }
 
-const NavItem: React.FC<NavItemProps> = ({ to, icon: Icon, label, active, onClick }) => (
+const NavItem: React.FC<NavItemProps> = ({ to, icon: Icon, label, active }) => (
   <Link
     to={to}
-    onClick={onClick}
     className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all duration-200 whitespace-nowrap ${active
       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100'
       : 'text-slate-600 hover:bg-slate-100'
@@ -59,7 +58,6 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   const { logout, user } = useAuth();
   const { searchQuery, setSearchQuery } = useSearch();
   const location = useLocation();
-  const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
 
   const navigationLinks = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -69,10 +67,8 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-50">
-      {/* Top Navigation Bar */}
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200">
         <div className="max-w-7xl mx-auto">
-          {/* Top Row: Logo & Actions */}
           <div className="flex items-center justify-between px-4 h-16">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-200">
@@ -113,8 +109,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
             </div>
           </div>
 
-          {/* Bottom Row: Navigation Links */}
-          <nav className="flex items-center gap-1 px-4 py-2 overflow-x-auto no-scrollbar border-t border-slate-50">
+          <nav className="flex items-center gap-1 px-4 py-2 overflow-x-auto border-t border-slate-50">
             {navigationLinks.map((link) => (
               <NavItem
                 key={link.to}
@@ -128,7 +123,6 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="flex-1">
         <div className="p-4 lg:p-8 max-w-7xl mx-auto">
           <AnimatePresence mode="wait">
@@ -152,16 +146,19 @@ export default function App() {
   return (
     <AuthProvider>
       <SearchProvider>
-        <Router>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="/" element={<PrivateRoute><Layout><Dashboard /></Layout></PrivateRoute>} />
-            <Route path="/leads" element={<PrivateRoute><Layout><LeadsTable /></Layout></PrivateRoute>} />
-            <Route path="/kanban" element={<PrivateRoute><Layout><Kanban /></Layout></PrivateRoute>} />
-            <Route path="/leads/:id" element={<PrivateRoute><Layout><LeadDetails /></Layout></PrivateRoute>} />
-            <Route path="*" element={<Navigate to="/" />} />
-          </Routes>
-        </Router>
+        <ToastProvider>
+          <Router>
+            <Routes>
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              <Route path="/" element={<PrivateRoute><Layout><Dashboard /></Layout></PrivateRoute>} />
+              <Route path="/leads" element={<PrivateRoute><Layout><LeadsTable /></Layout></PrivateRoute>} />
+              <Route path="/kanban" element={<PrivateRoute><Layout><Kanban /></Layout></PrivateRoute>} />
+              <Route path="/leads/:id" element={<PrivateRoute><Layout><LeadDetails /></Layout></PrivateRoute>} />
+              <Route path="*" element={<Navigate to="/" />} />
+            </Routes>
+          </Router>
+        </ToastProvider>
       </SearchProvider>
     </AuthProvider>
   );

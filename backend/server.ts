@@ -310,14 +310,17 @@ app.post('/api/stages', authenticateToken, async (req, res) => {
 });
 
 // ─── Lead Routes ───────────────────────────────────────────────────────────────
-// Get Leads (paginated / filtered)
+// Get Leads (paginated / filtered / sorted)
 app.get('/api/leads', authenticateToken, async (req, res) => {
     try {
-        const { page = 1, limit = 10, search, status } = req.query;
+        const { page = 1, limit = 10, search, status, sort = 'created_at', order = 'DESC', from, to } = req.query;
         const offset = (Number(page) - 1) * Number(limit);
+        const allowedSorts = ['name', 'rating', 'status', 'main_category', 'created_at', 'last_called'];
+        const safeSortCol = allowedSorts.includes(String(sort)) ? String(sort) : 'created_at';
+        const safeOrder = String(order).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
-        let query = 'SELECT * FROM leads WHERE 1=1';
-        let countQuery = 'SELECT COUNT(*) FROM leads WHERE 1=1';
+        let query = 'SELECT * FROM leads WHERE is_archived IS NOT TRUE';
+        let countQuery = 'SELECT COUNT(*) FROM leads WHERE is_archived IS NOT TRUE';
         const params: any[] = [];
         let paramIndex = 1;
 
@@ -329,13 +332,27 @@ app.get('/api/leads', authenticateToken, async (req, res) => {
         }
 
         if (search) {
-            query += ` AND (name ILIKE $${paramIndex} OR phone ILIKE $${paramIndex} OR address ILIKE $${paramIndex})`;
-            countQuery += ` AND (name ILIKE $${paramIndex} OR phone ILIKE $${paramIndex} OR address ILIKE $${paramIndex})`;
+            query += ` AND (name ILIKE $${paramIndex} OR phone ILIKE $${paramIndex} OR address ILIKE $${paramIndex} OR main_category ILIKE $${paramIndex})`;
+            countQuery += ` AND (name ILIKE $${paramIndex} OR phone ILIKE $${paramIndex} OR address ILIKE $${paramIndex} OR main_category ILIKE $${paramIndex})`;
             params.push(`%${search}%`);
             paramIndex++;
         }
 
-        query += ` ORDER BY created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+        if (from) {
+            query += ` AND created_at >= $${paramIndex}`;
+            countQuery += ` AND created_at >= $${paramIndex}`;
+            params.push(from);
+            paramIndex++;
+        }
+
+        if (to) {
+            query += ` AND created_at <= $${paramIndex}::date + INTERVAL '1 day'`;
+            countQuery += ` AND created_at <= $${paramIndex}::date + INTERVAL '1 day'`;
+            params.push(to);
+            paramIndex++;
+        }
+
+        query += ` ORDER BY ${safeSortCol} ${safeOrder} LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
         const queryParams = [...params, limit, offset];
 
         const [leadsRes, countRes] = await Promise.all([
@@ -599,23 +616,60 @@ app.get('/api/leads/:id', authenticateToken, async (req, res) => {
 });
 
 app.put('/api/leads/:id', authenticateToken, async (req, res) => {
-    const { status, notes, last_called, next_followup, call_attempts } = req.body;
-    await pool.query(
-        `UPDATE leads SET
-      status = COALESCE($1, status),
-      notes = COALESCE($2, notes),
-      last_called = COALESCE($3, last_called),
-      next_followup = COALESCE($4, next_followup),
-      call_attempts = COALESCE($5, call_attempts)
-     WHERE id = $6`,
-        [status, notes, last_called, next_followup, call_attempts, req.params.id]
-    );
+    const allowedFields: Record<string, string> = {
+        status: 'status', notes: 'notes', last_called: 'last_called',
+        next_followup: 'next_followup', call_attempts: 'call_attempts',
+        name: 'name', phone: 'phone', email: 'email', website: 'website',
+        address: 'address', main_category: 'main_category',
+        assigned_to: 'assigned_to', tags: 'tags',
+    };
+    const setClauses: string[] = [];
+    const values: any[] = [];
+    let i = 1;
+    for (const [k, col] of Object.entries(allowedFields)) {
+        if (req.body[k] !== undefined) {
+            setClauses.push(`${col} = $${i++}`);
+            values.push(req.body[k]);
+        }
+    }
+    if (setClauses.length === 0) return res.json({ message: 'Nothing to update' });
+    values.push(req.params.id);
+    await pool.query(`UPDATE leads SET ${setClauses.join(', ')} WHERE id = $${i}`, values);
     res.json({ message: 'Lead updated' });
 });
 
+// Soft-delete lead (moves to archive)
 app.delete('/api/leads/:id', authenticateToken, async (req, res) => {
+    await pool.query('UPDATE leads SET is_archived = TRUE WHERE id = $1', [req.params.id]);
+    res.json({ message: 'Lead archived' });
+});
+
+// Archive endpoint
+app.post('/api/leads/:id/archive', authenticateToken, async (req, res) => {
+    await pool.query('UPDATE leads SET is_archived = TRUE WHERE id = $1', [req.params.id]);
+    res.json({ message: 'Lead archived' });
+});
+
+// Restore endpoint
+app.post('/api/leads/:id/restore', authenticateToken, async (req, res) => {
+    await pool.query('UPDATE leads SET is_archived = FALSE WHERE id = $1', [req.params.id]);
+    res.json({ message: 'Lead restored' });
+});
+
+// Permanently delete
+app.delete('/api/leads/:id/permanent', authenticateToken, async (req, res) => {
     await pool.query('DELETE FROM leads WHERE id = $1', [req.params.id]);
-    res.json({ message: 'Lead deleted' });
+    res.json({ message: 'Lead permanently deleted' });
+});
+
+// Duplicate check
+app.get('/api/leads/duplicate-check', authenticateToken, async (req, res) => {
+    const { phone, name } = req.query;
+    const { rows } = await pool.query(
+        `SELECT id, name, phone FROM leads WHERE (phone = $1 AND $1 != '') OR (LOWER(name) = LOWER($2) AND $2 != '') LIMIT 5`,
+        [phone || '', name || '']
+    );
+    res.json({ duplicates: rows });
 });
 
 // ─── Call Log Routes ───────────────────────────────────────────────────────────
@@ -670,29 +724,58 @@ app.post('/api/leads/:id/tasks', authenticateToken, async (req, res) => {
 
 // ─── Dashboard Stats ───────────────────────────────────────────────────────────
 app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
-    const [totalLeads, callsToday, interested, converted, statusDist, callsPerDay, avgDur, outcomeDist] =
-        await Promise.all([
-            pool.query('SELECT COUNT(*) as count FROM leads'),
-            pool.query(`SELECT COUNT(*) as count FROM leads WHERE last_called::date = CURRENT_DATE`),
-            pool.query(`SELECT COUNT(*) as count FROM leads WHERE status = 'interested'`),
-            pool.query(`SELECT COUNT(*) as count FROM leads WHERE status = 'converted'`),
-            pool.query('SELECT status, COUNT(*) as count FROM leads GROUP BY status'),
-            pool.query(`SELECT DATE(timestamp) as date, COUNT(*) as count FROM call_logs GROUP BY DATE(timestamp) ORDER BY date DESC LIMIT 7`),
-            pool.query('SELECT AVG(duration) as avg FROM call_logs'),
-            pool.query('SELECT outcome, COUNT(*) as count FROM call_logs GROUP BY outcome'),
-        ]);
+    const [
+        totalLeads, totalLeadsLastWeek, callsToday, callsLastWeek,
+        interested, interestedLastWeek, converted, convertedLastWeek,
+        newLeadsThisWeek, statusDist, callsPerDay, avgDur, outcomeDist
+    ] = await Promise.all([
+        pool.query('SELECT COUNT(*) as count FROM leads WHERE is_archived IS NOT TRUE'),
+        pool.query(`SELECT COUNT(*) as count FROM leads WHERE created_at < NOW() - INTERVAL '7 days' AND is_archived IS NOT TRUE`),
+        pool.query(`SELECT COUNT(*) as count FROM leads WHERE last_called::date = CURRENT_DATE`),
+        pool.query(`SELECT COUNT(*) as count FROM leads WHERE last_called::date BETWEEN CURRENT_DATE - 7 AND CURRENT_DATE - 1`),
+        pool.query(`SELECT COUNT(*) as count FROM leads WHERE status = 'interested' AND is_archived IS NOT TRUE`),
+        pool.query(`SELECT COUNT(*) as count FROM leads WHERE status = 'interested' AND created_at < NOW() - INTERVAL '7 days' AND is_archived IS NOT TRUE`),
+        pool.query(`SELECT COUNT(*) as count FROM leads WHERE status = 'converted' AND is_archived IS NOT TRUE`),
+        pool.query(`SELECT COUNT(*) as count FROM leads WHERE status = 'converted' AND created_at < NOW() - INTERVAL '7 days' AND is_archived IS NOT TRUE`),
+        pool.query(`SELECT COUNT(*) as count FROM leads WHERE created_at >= NOW() - INTERVAL '7 days' AND is_archived IS NOT TRUE`),
+        pool.query('SELECT status, COUNT(*) as count FROM leads WHERE is_archived IS NOT TRUE GROUP BY status'),
+        pool.query(`SELECT DATE(timestamp) as date, COUNT(*) as count FROM call_logs GROUP BY DATE(timestamp) ORDER BY date DESC LIMIT 30`),
+        pool.query('SELECT AVG(duration) as avg FROM call_logs'),
+        pool.query('SELECT outcome, COUNT(*) as count FROM call_logs GROUP BY outcome'),
+    ]);
+
+    const computeTrend = (current: number, previous: number): number => {
+        if (previous === 0) return current > 0 ? 100 : 0;
+        return Math.round(((current - previous) / previous) * 100);
+    };
+
+    const total = parseInt(totalLeads.rows[0].count);
+    const totalPrev = parseInt(totalLeadsLastWeek.rows[0].count);
+    const calls = parseInt(callsToday.rows[0].count);
+    const callsPrev = Math.round(parseInt(callsLastWeek.rows[0].count) / 7);
+    const int_ = parseInt(interested.rows[0].count);
+    const intPrev = parseInt(interestedLastWeek.rows[0].count);
+    const conv = parseInt(converted.rows[0].count);
+    const convPrev = parseInt(convertedLastWeek.rows[0].count);
 
     res.json({
-        totalLeads: parseInt(totalLeads.rows[0].count),
-        callsToday: parseInt(callsToday.rows[0].count),
-        interested: parseInt(interested.rows[0].count),
-        converted: parseInt(converted.rows[0].count),
+        totalLeads: total,
+        totalTrend: computeTrend(total, totalPrev),
+        callsToday: calls,
+        callsTrend: computeTrend(calls, callsPrev),
+        interested: int_,
+        interestedTrend: computeTrend(int_, intPrev),
+        converted: conv,
+        convertedTrend: computeTrend(conv, convPrev),
+        newLeadsThisWeek: parseInt(newLeadsThisWeek.rows[0].count),
+        conversionRate: total > 0 ? parseFloat(((conv / total) * 100).toFixed(1)) : 0,
         statusDistribution: statusDist.rows.map(r => ({ ...r, count: parseInt(r.count) })),
         callsPerDay: callsPerDay.rows.reverse().map(r => ({ ...r, count: parseInt(r.count) })),
         avgDuration: Math.round(parseFloat(avgDur.rows[0].avg) || 0),
         outcomeDistribution: outcomeDist.rows.map(r => ({ ...r, count: parseInt(r.count) })),
     });
 });
+
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
 initDB().then(() => {
