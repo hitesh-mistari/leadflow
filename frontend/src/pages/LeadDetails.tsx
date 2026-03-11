@@ -296,8 +296,8 @@ export default function LeadDetails() {
             <ChevronLeft size={20} />
           </Link>
           <div className="min-w-0">
-            <h1 className="text-xl sm:text-2xl font-bold text-slate-900 truncate">{lead.name}</h1>
-            <p className="text-slate-500 text-xs sm:text-sm flex items-center gap-1">
+            <h1 className="text-xl sm:text-2xl font-bold text-black truncate">{lead.name}</h1>
+            <p className="text-black text-xs sm:text-sm font-bold flex items-center gap-1">
               <Tag size={12} />
               {lead.main_category}
             </p>
@@ -386,16 +386,16 @@ export default function LeadDetails() {
         {/* Left Column: Info */}
         <div className="lg:col-span-2 space-y-8">
           <div className="card p-4 sm:p-8">
-            <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
+            <h3 className="text-lg font-bold text-black mb-6 flex items-center gap-2">
               <FileText className="text-indigo-600" size={20} />
               Business Information
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8">
               <div className="space-y-4">
                 <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Phone Number</label>
+                  <label className="text-[10px] font-bold text-black uppercase tracking-wider">Phone Number</label>
                   <div className="flex items-center gap-3 mt-1">
-                    <a href={`tel:${lead.phone}`} className="flex items-center gap-2 text-indigo-600 font-bold text-lg">
+                    <a href={`tel:${lead.phone}`} className="flex items-center gap-2 text-black font-bold text-lg whitespace-nowrap">
                       <Phone size={20} />
                       {lead.phone}
                     </a>
@@ -406,7 +406,7 @@ export default function LeadDetails() {
                 <div>
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Website</label>
                   {lead.website ? (
-                    <a href={lead.website} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-slate-700 font-medium mt-1 hover:text-indigo-600 truncate">
+                    <a href={lead.website} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-black font-bold mt-1 hover:text-indigo-600 truncate">
                       <Globe size={18} />
                       <span className="truncate">{lead.website}</span>
                       <ExternalLink size={14} className="flex-shrink-0" />
@@ -417,7 +417,7 @@ export default function LeadDetails() {
                 </div>
                 <div>
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Address</label>
-                  <div className="flex items-start gap-2 text-slate-700 font-medium mt-1 text-sm">
+                  <div className="flex items-start gap-2 text-black font-bold mt-1 text-sm">
                     <MapPin size={18} className="mt-0.5 flex-shrink-0" />
                     <span>{lead.address}</span>
                   </div>
@@ -425,22 +425,22 @@ export default function LeadDetails() {
               </div>
               <div className="space-y-4">
                 <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Rating & Reviews</label>
+                  <label className="text-[10px] font-bold text-black uppercase tracking-wider">Rating & Reviews</label>
                   <div className="flex items-center gap-2 mt-1">
                     <div className="flex items-center gap-1 bg-amber-50 text-amber-700 px-2 py-1 rounded-lg font-bold text-sm">
                       <Star size={14} className="fill-amber-700" />
                       {lead.rating}
                     </div>
-                    <span className="text-slate-500 text-xs">({lead.reviews} reviews)</span>
+                    <span className="text-black text-xs font-bold">({lead.reviews} reviews)</span>
                   </div>
                 </div>
                 <div>
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Categories</label>
-                  <p className="text-slate-700 text-sm mt-1">{lead.categories}</p>
+                  <p className="text-black text-sm font-bold mt-1">{lead.categories}</p>
                 </div>
                 <div>
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Work Hours</label>
-                  <div className="flex items-center gap-2 text-slate-700 text-xs mt-1">
+                  <div className="flex items-center gap-2 text-black text-xs font-bold mt-1">
                     <Clock size={14} />
                     {lead.workday_timing}
                   </div>
@@ -450,14 +450,14 @@ export default function LeadDetails() {
 
             <div className="mt-8 pt-8 border-t border-slate-100">
               <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Description</label>
-              <p className="text-slate-600 text-sm mt-2 leading-relaxed">
+              <p className="text-black text-sm mt-2 leading-relaxed font-medium">
                 {lead.description || "No description provided for this business."}
               </p>
             </div>
           </div>
 
           <div className="card p-4 sm:p-8">
-            <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
+            <h3 className="text-lg font-bold text-black mb-6 flex items-center gap-2">
               <History className="text-indigo-600" size={20} />
               Call History
             </h3>
@@ -472,10 +472,10 @@ export default function LeadDetails() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-bold text-slate-900 capitalize truncate">{call.outcome.replace('_', ' ')}</span>
-                        <span className="text-[10px] text-slate-400 whitespace-nowrap ml-2">{new Date(call.timestamp).toLocaleDateString()}</span>
+                        <span className="text-sm font-bold text-black capitalize truncate">{call.outcome.replace('_', ' ')}</span>
+                        <span className="text-[10px] text-black font-bold whitespace-nowrap ml-2">{new Date(call.timestamp).toLocaleDateString()}</span>
                       </div>
-                      <div className="flex flex-col gap-1 text-[11px] text-slate-500">
+                      <div className="flex flex-col gap-1 text-[11px] text-black font-medium">
                         <span className="flex items-center gap-1">
                           <Timer size={10} />
                           {formatDuration(call.duration)}
@@ -491,7 +491,7 @@ export default function LeadDetails() {
 
           <div className="card p-8">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <h3 className="text-lg font-bold text-black flex items-center gap-2">
                 <FileText className="text-indigo-600" size={20} />
                 Notes
               </h3>
@@ -512,7 +512,7 @@ export default function LeadDetails() {
             ></textarea>
             <div className="mt-4 flex items-center justify-between text-sm text-slate-500">
               <p>Last updated: {lead.last_called ? new Date(lead.last_called).toLocaleString() : 'Never'}</p>
-              <p>Call attempts: <span className="font-bold text-slate-900">{lead.call_attempts || 0}</span></p>
+              <p>Call attempts: <span className="font-bold text-black">{lead.call_attempts || 0}</span></p>
             </div>
           </div>
         </div>
@@ -520,7 +520,7 @@ export default function LeadDetails() {
         {/* Right Column: Status & Map */}
         <div className="space-y-8">
           <div className="card p-8">
-            <h3 className="text-lg font-bold text-slate-900 mb-6">Pipeline Status</h3>
+            <h3 className="text-lg font-bold text-black mb-6">Pipeline Status</h3>
             <div className="space-y-3">
               {stages.map((stg) => (
                 <button
