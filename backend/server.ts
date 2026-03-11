@@ -15,7 +15,7 @@ const pool = new Pool({
     ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
 });
 
-const JWT_SECRET = process.env.JWT_SECRET || 'leadflow-fallback-secret';
+const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
 const PORT = process.env.PORT || 3001;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
@@ -53,6 +53,7 @@ const initDB = async () => {
         last_called TIMESTAMPTZ,
         next_followup TIMESTAMPTZ,
         call_attempts INTEGER DEFAULT 0,
+        city TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
 
@@ -82,6 +83,7 @@ const initDB = async () => {
         // Add 'name' column to users table if it doesn't exist yet (safe migration)
         await client.query(`
           ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT '';
+          ALTER TABLE leads ADD COLUMN IF NOT EXISTS city TEXT;
         `);
 
         // Safe migration for import_history columns
@@ -114,7 +116,8 @@ const initDB = async () => {
             console.log('✅ Default users created: admin@leadflow.com / Admin@123');
         }
 
-        await seedDatabase(client);
+        // Removed automatic seeding to allow for clean database
+        // await seedDatabase(client);
     } finally {
         client.release();
     }
@@ -196,14 +199,19 @@ app.get('/robots.txt', (_req, res) => {
 const authenticateToken = (req: any, res: any, next: any) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
-    if (!token) return res.status(401).json({ error: 'No token provided' });
-    try {
-        const decoded = jwt.verify(token, JWT_SECRET) as any;
-        req.user = decoded;
+    if (!token) return res.sendStatus(401);
+    jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
+        if (err) return res.sendStatus(403);
+        req.user = user;
         next();
-    } catch {
-        return res.status(403).json({ error: 'Invalid or expired token' });
-    }
+    });
+};
+
+const validateId = (req: any, res: any, next: any) => {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: `Invalid ID parameter: ${req.params.id}` });
+    req.params.id = id; // Replace with parsed integer
+    next();
 };
 
 // Health check
@@ -256,12 +264,19 @@ app.post('/api/auth/login', async (req: any, res: any) => {
 app.post('/api/auth/register', async (req: any, res: any) => {
     const { name, email, password } = req.body;
 
-    if (!name || !email || !password) {
-        return res.status(400).json({ error: 'All fields are required' });
+    if (!email || !password) {
+        return res.status(400).json({ error: 'Email and password are required' });
     }
 
     try {
         const emailLower = email.toLowerCase().trim();
+        let finalName = name;
+        if (!finalName || finalName === 'New User') {
+            // Remove numbers and special characters, keep only alphabets
+            finalName = emailLower.split('@')[0].replace(/[^a-zA-Z]/g, '');
+            // Capitalize first letter
+            finalName = finalName.charAt(0).toUpperCase() + finalName.slice(1);
+        }
         const { rows: existing } = await pool.query('SELECT * FROM users WHERE email = $1', [emailLower]);
 
         if (existing.length > 0) {
@@ -272,7 +287,7 @@ app.post('/api/auth/register', async (req: any, res: any) => {
 
         const { rows } = await pool.query(
             'INSERT INTO users (name, email, password) VALUES ($1, $2, $3) RETURNING id, name, email',
-            [name, emailLower, hashedPassword]
+            [finalName, emailLower, hashedPassword]
         );
 
         const user = rows[0];
@@ -291,8 +306,50 @@ app.post('/api/auth/register', async (req: any, res: any) => {
 });
 
 // Get current user info from token
-app.get('/api/auth/me', authenticateToken, (req: any, res) => {
-    res.json({ user: req.user });
+app.get('/api/auth/me', authenticateToken, async (req: any, res) => {
+    const { rows } = await pool.query('SELECT id, name, email FROM users WHERE id = $1', [req.user.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'User not found' });
+    res.json({ user: rows[0] });
+});
+
+// Update profile info
+app.put('/api/auth/profile', authenticateToken, async (req: any, res: any) => {
+    const { name, email, password } = req.body;
+    const userId = req.user.id;
+
+    try {
+        const updates = [];
+        const values = [];
+        let i = 1;
+
+        if (name) {
+            updates.push(`name = $${i++}`);
+            values.push(name);
+        }
+        if (email) {
+            updates.push(`email = $${i++}`);
+            values.push(email.toLowerCase().trim());
+        }
+        if (password) {
+            const hashedPassword = await bcrypt.hash(password, 10);
+            updates.push(`password = $${i++}`);
+            values.push(hashedPassword);
+        }
+
+        if (updates.length === 0) return res.json({ message: 'No changes provided' });
+
+        values.push(userId);
+        await pool.query(
+            `UPDATE users SET ${updates.join(', ')} WHERE id = $${i}`,
+            values
+        );
+
+        const { rows } = await pool.query('SELECT id, name, email FROM users WHERE id = $1', [userId]);
+        res.json({ message: 'Profile updated successfully', user: rows[0] });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error updating profile' });
+    }
 });
 
 // ─── Pipeline Stages Routes ────────────────────────────────────────────────────
@@ -332,10 +389,13 @@ app.post('/api/stages', authenticateToken, async (req, res) => {
 // Get Leads (paginated / filtered / sorted)
 app.get('/api/leads', authenticateToken, async (req, res) => {
     try {
-        const { page = 1, limit = 10, search, status, sort = 'created_at', order = 'DESC', from, to } = req.query;
+        const {
+            page = 1, limit = 10, search, status, city,
+            sortBy = 'created_at', order = 'desc', from, to
+        } = req.query;
         const offset = (Number(page) - 1) * Number(limit);
         const allowedSorts = ['name', 'rating', 'status', 'main_category', 'created_at', 'last_called'];
-        const safeSortCol = allowedSorts.includes(String(sort)) ? String(sort) : 'created_at';
+        const safeSortCol = allowedSorts.includes(String(sortBy)) ? String(sortBy) : 'created_at';
         const safeOrder = String(order).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
         let query = 'SELECT * FROM leads WHERE is_archived IS NOT TRUE';
@@ -347,6 +407,13 @@ app.get('/api/leads', authenticateToken, async (req, res) => {
             query += ` AND status = $${paramIndex}`;
             countQuery += ` AND status = $${paramIndex}`;
             params.push(status);
+            paramIndex++;
+        }
+
+        if (city) {
+            query += ` AND city = $${paramIndex}`;
+            countQuery += ` AND city = $${paramIndex}`;
+            params.push(city);
             paramIndex++;
         }
 
@@ -391,18 +458,38 @@ app.get('/api/leads', authenticateToken, async (req, res) => {
     }
 });
 
+app.get('/api/leads/cities', authenticateToken, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT DISTINCT city FROM leads WHERE city IS NOT NULL AND city != \'\' ORDER BY city ASC');
+        res.json(result.rows.map(r => r.city));
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to fetch cities' });
+    }
+});
+
+app.get('/api/test', (req, res) => {
+    res.json({ status: 'ok', time: new Date().toISOString(), message: 'Server is running latest extraction logic v4' });
+});
+
 // Export Leads
 app.get('/api/leads/export', authenticateToken, async (req, res) => {
     try {
-        const { search, status, format = 'csv' } = req.query;
+        const { search, status, city, format = 'csv' } = req.query;
 
-        let query = 'SELECT name, phone, email, status, rating, reviews, main_category, address, website, created_at, notes FROM leads WHERE 1=1';
+        let query = 'SELECT name, phone, email, city, status, rating, reviews, main_category, address, website, created_at, notes FROM leads WHERE 1=1';
         const params: any[] = [];
         let paramIndex = 1;
 
         if (status) {
             query += ` AND status = $${paramIndex}`;
             params.push(status);
+            paramIndex++;
+        }
+
+        if (city) {
+            query += ` AND city = $${paramIndex}`;
+            params.push(city);
             paramIndex++;
         }
 
@@ -452,8 +539,11 @@ app.get('/api/leads/export', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/leads/import', authenticateToken, async (req: any, res) => {
+    console.log(`📥 IMPORT TRIGGERED: ${req.body.filename || 'unknown'} | City fallback: [${req.body.city || 'none'}]`);
     let rawData = req.body.leads || req.body;
     let filename = req.body.filename || 'unknown.json';
+    let city = req.body.city || '';
+    let fileSize = req.body.size || 0;
 
     // ── Smart Array Finder: If not an array, find the largest array in the object ──
     let leads: any[] = [];
@@ -523,6 +613,47 @@ app.post('/api/leads/import', authenticateToken, async (req: any, res) => {
             const categories = getVal(['categories', 'tags']) || (main_category ? [main_category] : '');
             const workday_timing = getVal(['timing', 'hours', 'time']) || '';
             const is_temporarily_closed = !!getVal(['closed', 'temporary']) ? 1 : 0;
+            
+            // ── Robust City Extraction ──
+            const extractCity = () => {
+                // 1. Direct fields
+                const c = getVal(['city', 'town', 'location_city', 'municipality', 'locality', 'suburb', 'district', 'area', 'region', 'city_name']);
+                if (c) return String(c);
+
+                // 2. Nested location
+                if (raw.location && typeof raw.location === 'object') {
+                    if (raw.location.city) return String(raw.location.city);
+                    if (raw.location.locality) return String(raw.location.locality);
+                    if (raw.location.town) return String(raw.location.town);
+                }
+
+                // 3. Address components
+                if (Array.isArray(raw.address_components)) {
+                    const loc = raw.address_components.find((comp: any) => comp.types?.includes('locality'));
+                    if (loc) return String(loc.long_name || loc.short_name);
+                }
+
+                // 4. Parse from address string
+                if (address && address.includes(',')) {
+                    const parts = address.split(',').map(p => p.trim());
+                    if (parts.length >= 3) {
+                        const last = parts[parts.length - 1].toLowerCase();
+                        const candidate = (last === 'india' || last.length < 3) ? parts[parts.length - 3] : parts[parts.length - 2];
+                        const cleaned = candidate?.replace(/\d+/g, '').trim();
+                        if (cleaned && cleaned.length > 2) return cleaned;
+                    } else if (parts.length === 2) {
+                        const cleaned = parts[0].replace(/\d+/g, '').trim();
+                        if (cleaned && cleaned.length > 2) return cleaned;
+                    }
+                }
+                
+                return city; // Global fallback from req.body.city
+            };
+            const leadCity = extractCity();
+
+            if (importedCount === 0 || importedCount % 50 === 0) {
+                console.log(`DEBUG: Lead [${name}] -> Extracted City: [${leadCity}]`);
+            }
 
             // Stable place_id: use provided ID or fallback to name+phone fingerprint
             let place_id = getVal(['place_id', 'placeId', 'google_id', 'id', 'cid']);
@@ -549,8 +680,8 @@ app.post('/api/leads/import', authenticateToken, async (req: any, res) => {
                 await client.query(`SAVEPOINT sp_${importedCount + skippedCount}`);
                 const result = await client.query(
                     `INSERT INTO leads (place_id, name, description, phone, website, rating, reviews, address,
-                      latitude, longitude, main_category, categories, workday_timing, is_temporarily_closed)
-                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+                      latitude, longitude, main_category, categories, workday_timing, is_temporarily_closed, city)
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
                      ON CONFLICT (place_id) DO UPDATE SET
                        name = EXCLUDED.name,
                        description = EXCLUDED.description,
@@ -564,10 +695,11 @@ app.post('/api/leads/import', authenticateToken, async (req: any, res) => {
                        main_category = EXCLUDED.main_category,
                        categories = EXCLUDED.categories,
                        workday_timing = EXCLUDED.workday_timing,
-                       is_temporarily_closed = EXCLUDED.is_temporarily_closed
+                       is_temporarily_closed = EXCLUDED.is_temporarily_closed,
+                       city = EXCLUDED.city
                      RETURNING id`,
                     [place_id, name, description, phone, website, rating, reviews, address,
-                        latitude, longitude, main_category, categoriesStr, workday_timing, is_temporarily_closed]
+                        latitude, longitude, main_category, categoriesStr, workday_timing, is_temporarily_closed, leadCity]
                 );
                 await client.query(`RELEASE SAVEPOINT sp_${importedCount + skippedCount}`);
                 if (result.rowCount && result.rowCount > 0) {
@@ -584,9 +716,9 @@ app.post('/api/leads/import', authenticateToken, async (req: any, res) => {
 
         // Log import in history
         await client.query(
-            `INSERT INTO import_history (filename, total_records, imported_count, skipped_count, imported_by, status)
-             VALUES ($1, $2, $3, $4, $5, 'success')`,
-            [filename, leads.length, importedCount, skippedCount, req.user?.email || 'unknown']
+            `INSERT INTO import_history (filename, total_records, imported_count, skipped_count, imported_by, status, city, file_size)
+             VALUES ($1, $2, $3, $4, $5, 'success', $6, $7)`,
+            [filename, leads.length, importedCount, skippedCount, req.user?.email || 'unknown', city, fileSize]
         );
 
         await client.query('COMMIT');
@@ -603,15 +735,25 @@ app.post('/api/leads/import', authenticateToken, async (req: any, res) => {
         // Still log failed import
         try {
             await pool.query(
-                `INSERT INTO import_history (filename, total_records, imported_count, skipped_count, imported_by, status, error_message)
-                 VALUES ($1, $2, $3, $4, $5, 'failed', $6)`,
-                [filename, leads?.length || 0, importedCount, skippedCount, req.user?.email || 'unknown', err.message]
+                `INSERT INTO import_history (filename, total_records, imported_count, skipped_count, imported_by, status, error_message, city, file_size)
+                 VALUES ($1, $2, $3, $4, $5, 'failed', $6, $7, $8)`,
+                [filename, leads?.length || 0, importedCount, skippedCount, req.user?.email || 'unknown', err.message, city, fileSize]
             );
         } catch (_) { }
 
         res.status(500).json({ error: 'Import failed: ' + err.message });
     } finally {
         client.release();
+    }
+});
+
+app.get('/api/leads/cities', authenticateToken, async (req, res) => {
+    try {
+        const { rows } = await pool.query('SELECT DISTINCT city FROM leads WHERE city IS NOT NULL AND city != \'\' ORDER BY city ASC');
+        res.json(rows.map(r => r.city));
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error fetching cities' });
     }
 });
 
@@ -624,17 +766,25 @@ app.get('/api/imports', authenticateToken, async (req, res) => {
 });
 
 app.delete('/api/imports/:id', authenticateToken, async (req, res) => {
-    await pool.query('DELETE FROM import_history WHERE id = $1', [req.params.id]);
+    if (req.params.id === '-1') {
+        await pool.query('DELETE FROM import_history');
+        return res.json({ message: 'All import history cleared' });
+    }
+    
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
+    
+    await pool.query('DELETE FROM import_history WHERE id = $1', [id]);
     res.json({ message: 'Import history entry deleted' });
 });
 
-app.get('/api/leads/:id', authenticateToken, async (req, res) => {
+app.get('/api/leads/:id', authenticateToken, validateId, async (req: any, res) => {
     const { rows } = await pool.query('SELECT * FROM leads WHERE id = $1', [req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'Lead not found' });
     res.json(rows[0]);
 });
 
-app.put('/api/leads/:id', authenticateToken, async (req, res) => {
+app.put('/api/leads/:id', authenticateToken, validateId, async (req, res) => {
     const allowedFields: Record<string, string> = {
         status: 'status', notes: 'notes', last_called: 'last_called',
         next_followup: 'next_followup', call_attempts: 'call_attempts',
@@ -645,12 +795,29 @@ app.put('/api/leads/:id', authenticateToken, async (req, res) => {
     const setClauses: string[] = [];
     const values: any[] = [];
     let i = 1;
+    const oldLead = await pool.query('SELECT status, call_attempts FROM leads WHERE id = $1', [req.params.id]);
+    const isStatusChanging = req.body.status !== undefined && oldLead.rows[0] && req.body.status !== oldLead.rows[0].status;
+
     for (const [k, col] of Object.entries(allowedFields)) {
         if (req.body[k] !== undefined) {
             setClauses.push(`${col} = $${i++}`);
             values.push(req.body[k]);
         }
     }
+
+    // Auto-update last_called and log activity if status changed manually
+    if (isStatusChanging) {
+        if (req.body.last_called === undefined) {
+            setClauses.push(`last_called = NOW()`);
+            setClauses.push(`call_attempts = call_attempts + 1`);
+        }
+        // Log this interaction so it appears in charts and history
+        await pool.query(
+            'INSERT INTO call_logs (lead_id, duration, outcome, notes) VALUES ($1, $2, $3, $4)',
+            [req.params.id, 0, req.body.status, `Status changed to ${req.body.status}`]
+        );
+    }
+
     if (setClauses.length === 0) return res.json({ message: 'Nothing to update' });
     values.push(req.params.id);
     await pool.query(`UPDATE leads SET ${setClauses.join(', ')} WHERE id = $${i}`, values);
@@ -658,25 +825,25 @@ app.put('/api/leads/:id', authenticateToken, async (req, res) => {
 });
 
 // Soft-delete lead (moves to archive)
-app.delete('/api/leads/:id', authenticateToken, async (req, res) => {
+app.delete('/api/leads/:id', authenticateToken, validateId, async (req, res) => {
     await pool.query('UPDATE leads SET is_archived = TRUE WHERE id = $1', [req.params.id]);
     res.json({ message: 'Lead archived' });
 });
 
 // Archive endpoint
-app.post('/api/leads/:id/archive', authenticateToken, async (req, res) => {
+app.post('/api/leads/:id/archive', authenticateToken, validateId, async (req, res) => {
     await pool.query('UPDATE leads SET is_archived = TRUE WHERE id = $1', [req.params.id]);
     res.json({ message: 'Lead archived' });
 });
 
 // Restore endpoint
-app.post('/api/leads/:id/restore', authenticateToken, async (req, res) => {
+app.post('/api/leads/:id/restore', authenticateToken, validateId, async (req, res) => {
     await pool.query('UPDATE leads SET is_archived = FALSE WHERE id = $1', [req.params.id]);
     res.json({ message: 'Lead restored' });
 });
 
 // Permanently delete
-app.delete('/api/leads/:id/permanent', authenticateToken, async (req, res) => {
+app.delete('/api/leads/:id/permanent', authenticateToken, validateId, async (req, res) => {
     await pool.query('DELETE FROM leads WHERE id = $1', [req.params.id]);
     res.json({ message: 'Lead permanently deleted' });
 });
@@ -705,7 +872,7 @@ app.post('/api/calls', authenticateToken, async (req, res) => {
     res.status(201).json({ message: 'Call logged' });
 });
 
-app.get('/api/leads/:id/calls', authenticateToken, async (req, res) => {
+app.get('/api/leads/:id/calls', authenticateToken, validateId, async (req, res) => {
     const { rows } = await pool.query(
         'SELECT * FROM call_logs WHERE lead_id = $1 ORDER BY timestamp DESC',
         [req.params.id]
@@ -714,7 +881,7 @@ app.get('/api/leads/:id/calls', authenticateToken, async (req, res) => {
 });
 
 // ─── Task Routes ─────────────────────────────────────────────────────────────
-app.get('/api/leads/:id/tasks', authenticateToken, async (req, res) => {
+app.get('/api/leads/:id/tasks', authenticateToken, validateId, async (req, res) => {
     try {
         const { rows } = await pool.query(
             'SELECT * FROM tasks WHERE lead_id = $1 ORDER BY scheduled_at ASC',
@@ -727,7 +894,7 @@ app.get('/api/leads/:id/tasks', authenticateToken, async (req, res) => {
     }
 });
 
-app.post('/api/leads/:id/tasks', authenticateToken, async (req, res) => {
+app.post('/api/leads/:id/tasks', authenticateToken, validateId, async (req, res) => {
     try {
         const { scheduled_at, status = 'pending', type = 'call' } = req.body;
         const { rows } = await pool.query(
@@ -746,12 +913,12 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
     const [
         totalLeads, totalLeadsLastWeek, callsToday, callsLastWeek,
         interested, interestedLastWeek, converted, convertedLastWeek,
-        newLeadsThisWeek, statusDist, callsPerDay, avgDur, outcomeDist
+        newLeadsThisWeek, statusDist, callsPerDay, leadsPerDay, avgDur, outcomeDist
     ] = await Promise.all([
         pool.query('SELECT COUNT(*) as count FROM leads WHERE is_archived IS NOT TRUE'),
         pool.query(`SELECT COUNT(*) as count FROM leads WHERE created_at < NOW() - INTERVAL '7 days' AND is_archived IS NOT TRUE`),
-        pool.query(`SELECT COUNT(*) as count FROM leads WHERE last_called::date = CURRENT_DATE`),
-        pool.query(`SELECT COUNT(*) as count FROM leads WHERE last_called::date BETWEEN CURRENT_DATE - 7 AND CURRENT_DATE - 1`),
+        pool.query(`SELECT COUNT(*) as count FROM call_logs WHERE DATE(timestamp) = CURRENT_DATE`),
+        pool.query(`SELECT COUNT(*) as count FROM call_logs WHERE DATE(timestamp) BETWEEN CURRENT_DATE - 7 AND CURRENT_DATE - 1`),
         pool.query(`SELECT COUNT(*) as count FROM leads WHERE status = 'interested' AND is_archived IS NOT TRUE`),
         pool.query(`SELECT COUNT(*) as count FROM leads WHERE status = 'interested' AND created_at < NOW() - INTERVAL '7 days' AND is_archived IS NOT TRUE`),
         pool.query(`SELECT COUNT(*) as count FROM leads WHERE status = 'converted' AND is_archived IS NOT TRUE`),
@@ -759,6 +926,7 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
         pool.query(`SELECT COUNT(*) as count FROM leads WHERE created_at >= NOW() - INTERVAL '7 days' AND is_archived IS NOT TRUE`),
         pool.query('SELECT status, COUNT(*) as count FROM leads WHERE is_archived IS NOT TRUE GROUP BY status'),
         pool.query(`SELECT DATE(timestamp) as date, COUNT(*) as count FROM call_logs GROUP BY DATE(timestamp) ORDER BY date DESC LIMIT 30`),
+        pool.query(`SELECT DATE(created_at) as date, COUNT(*) as count FROM leads WHERE is_archived IS NOT TRUE GROUP BY DATE(created_at) ORDER BY date DESC LIMIT 30`),
         pool.query('SELECT AVG(duration) as avg FROM call_logs'),
         pool.query('SELECT outcome, COUNT(*) as count FROM call_logs GROUP BY outcome'),
     ]);
@@ -790,6 +958,7 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
         conversionRate: total > 0 ? parseFloat(((conv / total) * 100).toFixed(1)) : 0,
         statusDistribution: statusDist.rows.map(r => ({ ...r, count: parseInt(r.count) })),
         callsPerDay: callsPerDay.rows.reverse().map(r => ({ ...r, count: parseInt(r.count) })),
+        leadsPerDay: leadsPerDay.rows.reverse().map(r => ({ ...r, count: parseInt(r.count) })),
         avgDuration: Math.round(parseFloat(avgDur.rows[0].avg) || 0),
         outcomeDistribution: outcomeDist.rows.map(r => ({ ...r, count: parseInt(r.count) })),
     });

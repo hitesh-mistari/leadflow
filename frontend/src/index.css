@@ -8,7 +8,7 @@
 
 @layer base {
   body {
-    @apply bg-slate-50 text-slate-900 font-sans;
+    @apply bg-slate-50 text-black font-sans;
   }
 }
 
@@ -23,7 +23,7 @@
     @apply bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-200;
   }
   .btn-secondary {
-    @apply bg-white text-slate-700 border border-slate-200 hover:bg-slate-50;
+    @apply bg-white text-black border border-slate-200 hover:bg-slate-50;
   }
   .btn-danger {
     @apply bg-red-600 text-white hover:bg-red-700;

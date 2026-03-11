@@ -105,9 +105,9 @@ export default function LeadsTable() {
   const [dateTo, setDateTo] = useState(searchParams.get('to') || '');
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
-  const [importHistory, setImportHistory] = useState<any[]>([]);
-  const [showHistory, setShowHistory] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [cities, setCities] = useState<string[]>([]);
+  const [cityFilter, setCityFilter] = useState(searchParams.get('city') || '');
 
   // Bulk select
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -125,6 +125,7 @@ export default function LeadsTable() {
     if (page > 1 || overrides.page) params.page = String(overrides.page ?? page);
     if (pageSize !== 10 || overrides.limit) params.limit = String(overrides.limit ?? pageSize);
     if (statusFilter || overrides.status !== undefined) params.status = String(overrides.status ?? statusFilter);
+    if (cityFilter || overrides.city !== undefined) params.city = String(overrides.city ?? cityFilter);
     if (dateFrom || overrides.from) params.from = String(overrides.from ?? dateFrom);
     if (dateTo || overrides.to) params.to = String(overrides.to ?? dateTo);
     if (sortBy !== 'created_at') params.sort = String(overrides.sort ?? sortBy);
@@ -135,7 +136,7 @@ export default function LeadsTable() {
   const fetchLeads = async () => {
     setLoading(true);
     try {
-      const params: any = { page, limit: pageSize, search: searchQuery, status: statusFilter, sort: sortBy, order: sortOrder };
+      const params: any = { page, limit: pageSize, search: searchQuery, status: statusFilter, city: cityFilter, sort: sortBy, order: sortOrder };
       if (dateFrom) params.from = dateFrom;
       if (dateTo) params.to = dateTo;
       const { data } = await api.get('/leads', { params });
@@ -152,20 +153,22 @@ export default function LeadsTable() {
   const fetchStages = async () => {
     try {
       const { data } = await api.get('/stages');
-      setStages(data);
-    } catch {}
+      setStages(data.map((s: any) => ({ name: s.id, label: s.name })));
+    } catch (_) { }
   };
 
-  useEffect(() => { fetchLeads(); }, [page, pageSize, statusFilter, searchQuery, sortBy, sortOrder, dateFrom, dateTo]);
-  useEffect(() => { fetchStages(); }, []);
-  useEffect(() => { if (showHistory) fetchImportHistory(); }, [showHistory]);
-
-  const fetchImportHistory = async () => {
+  const fetchCities = async () => {
     try {
-      const { data } = await api.get('/imports');
-      setImportHistory(data);
-    } catch {}
+      const { data } = await api.get('/leads/cities');
+      setCities(data);
+    } catch (_) { }
   };
+
+  useEffect(() => { fetchLeads(); }, [page, pageSize, statusFilter, cityFilter, searchQuery, sortBy, sortOrder, dateFrom, dateTo]);
+  useEffect(() => {
+    fetchStages();
+    fetchCities();
+  }, []);
 
   // ── Sort toggle ──
   const toggleSort = (col: string) => {
@@ -262,7 +265,6 @@ export default function LeadsTable() {
         const { data } = await api.post('/leads/import', { leads: arr, filename: file.name });
         success(`Imported ${data.imported} leads`, `${data.skipped} skipped from ${file.name}`);
         fetchLeads();
-        if (showHistory) fetchImportHistory();
       } catch (err: any) {
         toastError('Import failed', err.response?.data?.error || 'Invalid JSON file');
       } finally {
@@ -279,6 +281,7 @@ export default function LeadsTable() {
       const qp = new URLSearchParams({ format });
       if (searchQuery) qp.append('search', searchQuery);
       if (statusFilter) qp.append('status', statusFilter);
+      if (cityFilter) qp.append('city', cityFilter);
       if (dateFrom) qp.append('from', dateFrom);
       if (dateTo) qp.append('to', dateTo);
       const resp = await fetch(`/api/leads/export?${qp}`, { headers: { Authorization: `Bearer ${token}` } });
@@ -303,25 +306,10 @@ export default function LeadsTable() {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Leads Management</h1>
-          <p className="text-slate-500 text-sm">{total.toLocaleString()} total leads in your pipeline</p>
+          <h1 className="text-2xl font-bold text-black">Leads Management</h1>
+          <p className="text-black text-sm">{total.toLocaleString()} total leads in your pipeline</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <input type="file" ref={fileInputRef} onChange={handleImport} className="hidden" accept=".json" />
-          <button onClick={() => fileInputRef.current?.click()} disabled={importing} className="btn btn-secondary">
-            {importing ? <Loader2 className="animate-spin mr-2" size={18} /> : <Upload size={18} className="mr-2" />}
-            Import JSON
-          </button>
-          <button onClick={() => setShowHistory(!showHistory)} className={`btn btn-secondary ${showHistory ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : ''}`}>
-            <History size={18} className="mr-2" />History
-          </button>
-          <div className="relative group">
-            <button className="btn btn-secondary"><Download size={18} className="mr-2" />Export</button>
-            <div className="absolute right-0 mt-2 w-40 bg-white border border-slate-200 rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
-              <button onClick={() => exportData('csv')} className="w-full text-left px-4 py-2 hover:bg-slate-50 text-sm">Export CSV</button>
-              <button onClick={() => exportData('json')} className="w-full text-left px-4 py-2 hover:bg-slate-50 text-sm border-t border-slate-100">Export JSON</button>
-            </div>
-          </div>
           <button onClick={() => setShowAddModal(true)} className="btn btn-primary"><Plus size={18} className="mr-2" />Add Lead</button>
         </div>
       </div>
@@ -341,42 +329,6 @@ export default function LeadsTable() {
         </div>
       )}
 
-      {/* Import History */}
-      {showHistory && (
-        <div className="card overflow-hidden">
-          <div className="p-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
-            <h3 className="font-bold text-slate-900 flex items-center gap-2"><History size={18} className="text-indigo-600" />Import History</h3>
-            <button onClick={() => setShowHistory(false)} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
-          </div>
-          {importHistory.length === 0 ? (
-            <div className="p-8 text-center text-slate-500 text-sm">No imports yet.</div>
-          ) : (
-            <div className="divide-y divide-slate-100 max-h-[300px] overflow-y-auto">
-              {importHistory.map((entry: any) => (
-                <div key={entry.id} className="px-6 py-4 flex items-center justify-between hover:bg-slate-50">
-                  <div className="flex items-center gap-4 min-w-0">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${entry.status === 'success' ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
-                      {entry.status === 'success' ? <CheckCircle2 size={16} /> : <XCircle size={16} />}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-bold text-sm text-slate-900 truncate">{entry.filename}</p>
-                      <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
-                        <span className="flex items-center gap-1"><Clock size={10} />{new Date(entry.imported_at).toLocaleString()}</span>
-                        {entry.imported_by && <span>• by {entry.imported_by}</span>}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <div className="text-sm font-bold text-slate-900">{entry.imported_count} <span className="text-xs font-normal text-slate-400">imported</span></div>
-                    <div className="text-xs text-slate-400">{entry.skipped_count} skipped • {entry.total_records} total</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Main Table Card */}
       <div className="card">
         {/* Filters */}
@@ -389,14 +341,12 @@ export default function LeadsTable() {
             <div className="flex flex-wrap items-center gap-2">
               <Filter size={18} className="text-slate-400 shrink-0" />
               <select className="input w-44" value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1); syncURL({ status: e.target.value, page: 1 }); }}>
-                <option value="">All Statuses</option>
+                <option value="">All Status</option>
                 {stages.map(s => <option key={s.name} value={s.name}>{s.label}</option>)}
               </select>
-              <select className="input w-24" value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); syncURL({ limit: e.target.value, page: 1 }); }}>
-                <option value={10}>10 / pg</option>
-                <option value={25}>25 / pg</option>
-                <option value={50}>50 / pg</option>
-                <option value={100}>100 / pg</option>
+              <select className="input w-40" value={cityFilter} onChange={e => { setCityFilter(e.target.value); setPage(1); syncURL({ city: e.target.value, page: 1 }); }}>
+                <option value="">All Cities</option>
+                {cities.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
           </div>
@@ -421,23 +371,23 @@ export default function LeadsTable() {
                 <th className="px-4 py-4 w-10">
                   <input type="checkbox" className="rounded" checked={selectedIds.size === leads.length && leads.length > 0} onChange={toggleSelectAll} />
                 </th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider cursor-pointer select-none" onClick={() => toggleSort('name')}>
+                <th className="px-6 py-4 text-xs font-bold text-black uppercase tracking-wider cursor-pointer select-none" onClick={() => toggleSort('name')}>
                   <div className="flex items-center gap-1">Business Name <SortIcon col="name" /></div>
                 </th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Contact</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider cursor-pointer select-none" onClick={() => toggleSort('rating')}>
+                <th className="px-6 py-4 text-xs font-bold text-black uppercase tracking-wider">Contact</th>
+                <th className="px-6 py-4 text-xs font-bold text-black uppercase tracking-wider cursor-pointer select-none" onClick={() => toggleSort('rating')}>
                   <div className="flex items-center gap-1">Rating <SortIcon col="rating" /></div>
                 </th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider cursor-pointer select-none" onClick={() => toggleSort('main_category')}>
+                <th className="px-6 py-4 text-xs font-bold text-black uppercase tracking-wider cursor-pointer select-none" onClick={() => toggleSort('main_category')}>
                   <div className="flex items-center gap-1">Category <SortIcon col="main_category" /></div>
                 </th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider cursor-pointer select-none" onClick={() => toggleSort('status')}>
+                <th className="px-6 py-4 text-xs font-bold text-black uppercase tracking-wider cursor-pointer select-none" onClick={() => toggleSort('status')}>
                   <div className="flex items-center gap-1">Status <SortIcon col="status" /></div>
                 </th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider cursor-pointer select-none" onClick={() => toggleSort('created_at')}>
+                <th className="px-6 py-4 text-xs font-bold text-black uppercase tracking-wider cursor-pointer select-none" onClick={() => toggleSort('created_at')}>
                   <div className="flex items-center gap-1">Added <SortIcon col="created_at" /></div>
                 </th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Actions</th>
+                <th className="px-6 py-4 text-xs font-bold text-black uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -456,10 +406,10 @@ export default function LeadsTable() {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex flex-col">
-                      <Link to={`/leads/${lead.id}`} className="font-bold text-slate-900 hover:text-indigo-600 transition-colors">{lead.name}</Link>
+                      <Link to={`/leads/${lead.id}`} className="font-bold text-black hover:text-indigo-600 transition-colors">{lead.name}</Link>
                       {lead.address && (
                         <div className="flex items-center gap-1 text-xs text-slate-500 mt-1">
-                          <MapPin size={12} /><span className="truncate max-w-[200px]">{lead.address}</span>
+                          <MapPin size={12} /><span className="truncate max-w-[200px] text-black font-medium">{lead.address}</span>
                         </div>
                       )}
                     </div>
@@ -468,7 +418,7 @@ export default function LeadsTable() {
                     <div className="flex flex-col gap-1">
                       {lead.phone ? (
                         <div className="flex items-center gap-2">
-                          <a href={`tel:${lead.phone}`} className="text-sm font-medium text-slate-700 flex items-center gap-1 hover:text-indigo-600">
+                          <a href={`tel:${lead.phone}`} className="text-sm font-bold text-black flex items-center gap-1 hover:text-indigo-600 whitespace-nowrap">
                             <Phone size={14} />{lead.phone}
                           </a>
                           <WhatsAppButton phone={lead.phone} name={lead.name} />
@@ -489,13 +439,13 @@ export default function LeadsTable() {
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <span className="text-sm text-slate-600">{lead.main_category}</span>
+                    <span className="text-sm text-black font-medium">{lead.main_category}</span>
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex flex-col gap-1">
                       <StatusBadge status={lead.status} />
                       <select
-                        className="text-xs text-slate-500 bg-transparent border-none focus:ring-0 p-0 cursor-pointer mt-1"
+                        className="text-xs text-black font-bold bg-transparent border-none focus:ring-0 p-0 cursor-pointer mt-1"
                         value={lead.status}
                         onChange={(e) => updateStatus(lead.id, e.target.value)}
                       >
@@ -504,7 +454,7 @@ export default function LeadsTable() {
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <span className="text-xs text-slate-400">{new Date(lead.created_at).toLocaleDateString()}</span>
+                    <span className="text-xs text-black font-medium">{new Date(lead.created_at).toLocaleDateString()}</span>
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
@@ -538,8 +488,8 @@ export default function LeadsTable() {
               <div className="flex items-start gap-3 mb-3">
                 <input type="checkbox" className="rounded mt-1" checked={selectedIds.has(lead.id)} onChange={() => toggleSelect(lead.id)} />
                 <div className="flex-1 min-w-0">
-                  <Link to={`/leads/${lead.id}`} className="font-bold text-slate-900 block">{lead.name}</Link>
-                  <span className="text-xs text-slate-400">{lead.main_category}</span>
+                  <Link to={`/leads/${lead.id}`} className="font-bold text-black block">{lead.name}</Link>
+                  <span className="text-xs text-black font-medium">{lead.main_category}</span>
                 </div>
                 <StatusBadge status={lead.status} />
               </div>
@@ -548,7 +498,7 @@ export default function LeadsTable() {
                   {lead.phone && <a href={`tel:${lead.phone}`} className="w-9 h-9 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center"><Phone size={16} /></a>}
                   {lead.phone && <WhatsAppButton phone={lead.phone} name={lead.name} />}
                   <div className="flex flex-col">
-                    <span className="text-xs font-bold text-slate-700">{lead.phone}</span>
+                    <span className="text-xs font-bold text-black whitespace-nowrap">{lead.phone}</span>
                     <div className="flex items-center gap-1 text-[10px] text-amber-500 font-bold"><Star size={10} className="fill-amber-500" />{lead.rating}</div>
                   </div>
                 </div>
