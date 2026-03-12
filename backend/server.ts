@@ -315,6 +315,17 @@ app.get('/api/auth/me', authenticateToken, async (req: any, res) => {
     res.json({ user: rows[0] });
 });
 
+// ─── User Routes ──────────────────────────────────────────────────────────────
+app.get('/api/users', authenticateToken, async (req, res) => {
+    try {
+        const { rows } = await pool.query('SELECT id, name, email FROM users ORDER BY name ASC');
+        res.json(rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to fetch users' });
+    }
+});
+
 // Update profile info
 app.put('/api/auth/profile', authenticateToken, async (req: any, res: any) => {
     const { name, email, password } = req.body;
@@ -393,7 +404,7 @@ app.post('/api/stages', authenticateToken, async (req, res) => {
 app.get('/api/leads', authenticateToken, async (req, res) => {
     try {
         const {
-            page = 1, limit = 10, search, status, city,
+            page = 1, limit = 10, search, status, city, called_by,
             sortBy = 'created_at', order = 'desc', from, to
         } = req.query;
         const offset = (Number(page) - 1) * Number(limit);
@@ -429,6 +440,13 @@ app.get('/api/leads', authenticateToken, async (req, res) => {
             query += ` AND (name ILIKE $${paramIndex} OR phone ILIKE $${paramIndex} OR address ILIKE $${paramIndex} OR main_category ILIKE $${paramIndex})`;
             countQuery += ` AND (name ILIKE $${paramIndex} OR phone ILIKE $${paramIndex} OR address ILIKE $${paramIndex} OR main_category ILIKE $${paramIndex})`;
             params.push(`%${search}%`);
+            paramIndex++;
+        }
+
+        if (called_by) {
+            query += ` AND last_called_by = $${paramIndex}`;
+            countQuery += ` AND last_called_by = $${paramIndex}`;
+            params.push(called_by);
             paramIndex++;
         }
 

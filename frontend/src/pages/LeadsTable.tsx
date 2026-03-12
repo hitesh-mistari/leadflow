@@ -108,6 +108,8 @@ export default function LeadsTable() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [cities, setCities] = useState<string[]>([]);
   const [cityFilter, setCityFilter] = useState(searchParams.get('city') || '');
+  const [teammates, setTeammates] = useState<any[]>([]);
+  const [calledByFilter, setCalledByFilter] = useState(searchParams.get('called_by') || '');
 
   // Bulk select
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -126,6 +128,7 @@ export default function LeadsTable() {
     if (pageSize !== 10 || overrides.limit) params.limit = String(overrides.limit ?? pageSize);
     if (statusFilter || overrides.status !== undefined) params.status = String(overrides.status ?? statusFilter);
     if (cityFilter || overrides.city !== undefined) params.city = String(overrides.city ?? cityFilter);
+    if (calledByFilter || overrides.called_by !== undefined) params.called_by = String(overrides.called_by ?? calledByFilter);
     if (dateFrom || overrides.from) params.from = String(overrides.from ?? dateFrom);
     if (dateTo || overrides.to) params.to = String(overrides.to ?? dateTo);
     if (sortBy !== 'created_at') params.sort = String(overrides.sort ?? sortBy);
@@ -136,7 +139,16 @@ export default function LeadsTable() {
   const fetchLeads = async () => {
     setLoading(true);
     try {
-      const params: any = { page, limit: pageSize, search: searchQuery, status: statusFilter, city: cityFilter, sort: sortBy, order: sortOrder };
+      const params: any = { 
+        page, 
+        limit: pageSize, 
+        search: searchQuery, 
+        status: statusFilter, 
+        city: cityFilter, 
+        called_by: calledByFilter,
+        sort: sortBy, 
+        order: sortOrder 
+      };
       if (dateFrom) params.from = dateFrom;
       if (dateTo) params.to = dateTo;
       const { data } = await api.get('/leads', { params });
@@ -153,7 +165,7 @@ export default function LeadsTable() {
   const fetchStages = async () => {
     try {
       const { data } = await api.get('/stages');
-      setStages(data.map((s: any) => ({ name: s.id, label: s.name })));
+      setStages(data.map((s: any) => ({ name: s.name, label: s.label || s.name })));
     } catch (_) { }
   };
 
@@ -164,10 +176,18 @@ export default function LeadsTable() {
     } catch (_) { }
   };
 
-  useEffect(() => { fetchLeads(); }, [page, pageSize, statusFilter, cityFilter, searchQuery, sortBy, sortOrder, dateFrom, dateTo]);
+  const fetchTeammates = async () => {
+    try {
+      const { data } = await api.get('/users');
+      setTeammates(data);
+    } catch (_) { }
+  };
+
+  useEffect(() => { fetchLeads(); }, [page, pageSize, statusFilter, cityFilter, calledByFilter, searchQuery, sortBy, sortOrder, dateFrom, dateTo]);
   useEffect(() => {
     fetchStages();
     fetchCities();
+    fetchTeammates();
   }, []);
 
   // ── Sort toggle ──
@@ -347,6 +367,10 @@ export default function LeadsTable() {
               <select className="input w-40" value={cityFilter} onChange={e => { setCityFilter(e.target.value); setPage(1); syncURL({ city: e.target.value, page: 1 }); }}>
                 <option value="">All Cities</option>
                 {cities.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <select className="input w-44" value={calledByFilter} onChange={e => { setCalledByFilter(e.target.value); setPage(1); syncURL({ called_by: e.target.value, page: 1 }); }}>
+                <option value="">All Teammates</option>
+                {teammates.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
             </div>
           </div>
