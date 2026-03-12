@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Trash2,
+  MapPin,
   History as LucideHistory
 } from 'lucide-react';
 

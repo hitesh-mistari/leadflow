@@ -44,9 +44,16 @@ const LeadCard = ({ lead, onDragStart }: any) => (
     </div>
 
     <div className="flex items-center justify-between pt-3 border-t border-slate-50">
-      <a href={`tel:${lead.phone}`} className="p-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors">
-        <Phone size={14} />
-      </a>
+      <div className="flex flex-col">
+        <a href={`tel:${lead.phone}`} className="p-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors inline-block w-fit">
+          <Phone size={14} />
+        </a>
+        {lead.last_called_by_name && (
+          <span className="text-[9px] text-slate-400 mt-1 font-medium italic">
+            Called: {lead.last_called_by_name}
+          </span>
+        )}
+      </div>
       <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
         {lead.main_category}
       </div>

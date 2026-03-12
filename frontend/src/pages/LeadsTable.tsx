@@ -375,9 +375,6 @@ export default function LeadsTable() {
                   <div className="flex items-center gap-1">Business Name <SortIcon col="name" /></div>
                 </th>
                 <th className="px-6 py-4 text-xs font-bold text-black uppercase tracking-wider">Contact</th>
-                <th className="px-6 py-4 text-xs font-bold text-black uppercase tracking-wider cursor-pointer select-none" onClick={() => toggleSort('rating')}>
-                  <div className="flex items-center gap-1">Rating <SortIcon col="rating" /></div>
-                </th>
                 <th className="px-6 py-4 text-xs font-bold text-black uppercase tracking-wider cursor-pointer select-none" onClick={() => toggleSort('main_category')}>
                   <div className="flex items-center gap-1">Category <SortIcon col="main_category" /></div>
                 </th>
@@ -387,6 +384,7 @@ export default function LeadsTable() {
                 <th className="px-6 py-4 text-xs font-bold text-black uppercase tracking-wider cursor-pointer select-none" onClick={() => toggleSort('created_at')}>
                   <div className="flex items-center gap-1">Added <SortIcon col="created_at" /></div>
                 </th>
+                <th className="px-6 py-4 text-xs font-bold text-black uppercase tracking-wider">Called By</th>
                 <th className="px-6 py-4 text-xs font-bold text-black uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
@@ -406,7 +404,15 @@ export default function LeadsTable() {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex flex-col">
-                      <Link to={`/leads/${lead.id}`} className="font-bold text-black hover:text-indigo-600 transition-colors">{lead.name}</Link>
+                      <div className="flex items-center gap-2">
+                        <Link to={`/leads/${lead.id}`} className="font-bold text-black hover:text-indigo-600 transition-colors line-clamp-1">{lead.name}</Link>
+                        {lead.rating > 0 && (
+                          <div className="flex items-center gap-1 shrink-0 bg-amber-50 px-1.5 py-0.5 rounded text-[10px] font-bold text-amber-600 border border-amber-100">
+                            <Star size={10} className="fill-amber-500 text-amber-500" />
+                            <span>{lead.rating}</span>
+                          </div>
+                        )}
+                      </div>
                       {lead.address && (
                         <div className="flex items-center gap-1 text-xs text-slate-500 mt-1">
                           <MapPin size={12} /><span className="truncate max-w-[200px] text-black font-medium">{lead.address}</span>
@@ -432,13 +438,6 @@ export default function LeadsTable() {
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex items-center gap-1">
-                      <Star size={14} className="text-amber-400 fill-amber-400" />
-                      <span className="text-sm font-bold text-slate-700">{lead.rating}</span>
-                      <span className="text-xs text-slate-400">({lead.reviews})</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
                     <span className="text-sm text-black font-medium">{lead.main_category}</span>
                   </td>
                   <td className="px-6 py-4">
@@ -455,6 +454,16 @@ export default function LeadsTable() {
                   </td>
                   <td className="px-6 py-4">
                     <span className="text-xs text-black font-medium">{new Date(lead.created_at).toLocaleDateString()}</span>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-indigo-600">{lead.last_called_by_name || '-'}</span>
+                      {lead.last_called && (
+                        <span className="text-[10px] text-slate-400">
+                          {new Date(lead.last_called).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
