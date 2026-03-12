@@ -9,7 +9,12 @@ interface AddLeadModalProps {
 
 export default function AddLeadModal({ onClose, onSuccess }: AddLeadModalProps) {
     const [loading, setLoading] = useState(false);
+    const [stages, setStages] = useState<any[]>([]);
     const [error, setError] = useState('');
+
+    React.useEffect(() => {
+        api.get('/stages').then(res => setStages(res.data)).catch(console.error);
+    }, []);
 
     const [formData, setFormData] = useState({
         name: '',
@@ -140,13 +145,21 @@ export default function AddLeadModal({ onClose, onSuccess }: AddLeadModalProps) 
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Status</label>
                                 <select name="status" value={formData.status} onChange={handleChange} className="input w-full bg-white">
-                                    <option value="not_called">Not Called</option>
-                                    <option value="called_no_response">Called (No Response)</option>
-                                    <option value="follow_up">Follow Up</option>
-                                    <option value="interested">Interested</option>
-                                    <option value="converted">Converted</option>
-                                    <option value="not_interested">Not Interested</option>
-                                    <option value="closed">Closed</option>
+                                    {stages.length > 0 ? (
+                                        stages.map(s => (
+                                            <option key={s.name} value={s.name}>{s.label || s.name}</option>
+                                        ))
+                                    ) : (
+                                        <>
+                                            <option value="not_called">Not Called</option>
+                                            <option value="called_no_response">Called (No Response)</option>
+                                            <option value="follow_up">Follow Up</option>
+                                            <option value="interested">Interested</option>
+                                            <option value="converted">Converted</option>
+                                            <option value="not_interested">Not Interested</option>
+                                            <option value="closed">Closed</option>
+                                        </>
+                                    )}
                                 </select>
                             </div>
                         </div>

@@ -149,7 +149,10 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="card p-4 sm:p-6 lg:col-span-2">
           <div className="flex items-center justify-between mb-8">
-            <h3 className="font-bold text-black">Activity Log</h3>
+            <h3 className="font-bold text-black flex items-center gap-2">
+              Activity History
+              <span className="text-[10px] font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">Calls vs New Leads</span>
+            </h3>
             <select
               className="text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-1 focus:ring-0"
               value={chartDays}
@@ -169,9 +172,9 @@ export default function Dashboard() {
                     tickFormatter={(val) => new Date(val).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} />
                   <YAxis axisLine={false} tickLine={false} tick={{ fill: '#000000', fontSize: 10, fontWeight: 'bold' }} />
                   <Tooltip contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', fontSize: '12px', color: '#000' }} itemStyle={{ color: '#000', fontWeight: 'bold' }} />
-                  <Line type="monotone" dataKey="calls" name="Calls Made" stroke="#6366f1" strokeWidth={3}
+                  <Line type="monotone" dataKey="calls" name="Calls" stroke="#6366f1" strokeWidth={3}
                     dot={{ r: 4, fill: '#6366f1', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6, strokeWidth: 0 }} />
-                  <Line type="monotone" dataKey="leads" name="Leads Added" stroke="#10b981" strokeWidth={3}
+                  <Line type="monotone" dataKey="leads" name="Leads" stroke="#10b981" strokeWidth={3}
                     dot={{ r: 4, fill: '#10b981', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6, strokeWidth: 0 }} />
                 </LineChart>
               </ResponsiveContainer>
@@ -185,9 +188,11 @@ export default function Dashboard() {
         </div>
 
         <div className="card p-4 sm:p-6">
-          <h3 className="font-bold text-black mb-8">
-            {stats?.outcomeDistribution?.length > 0 ? 'Lead Outcomes' : 'Lead Statuses'}
+          <h3 className="font-bold text-black mb-1 flex items-center justify-between">
+            {stats?.outcomeDistribution?.length > 0 ? 'Call Outcomes' : 'Pipeline Status'}
+            <span className="text-[10px] font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">Lead Distribution</span>
           </h3>
+          <p className="text-[10px] text-slate-400 mb-6 font-medium uppercase tracking-tight">How your leads are distributed across states</p>
           <div className="h-[200px] sm:h-[250px] relative flex items-center justify-center">
             { (stats?.outcomeDistribution?.length > 0 || stats?.statusDistribution?.length > 0) ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -201,12 +206,17 @@ export default function Dashboard() {
                     paddingAngle={5} 
                     dataKey="count" 
                     nameKey={stats?.outcomeDistribution?.length > 0 ? 'outcome' : 'status'}
+                    name="Leads"
                   >
                     {(stats?.outcomeDistribution?.length > 0 ? stats.outcomeDistribution : stats.statusDistribution).map((_: any, index: number) => (
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', color: '#000' }} itemStyle={{ color: '#000', fontWeight: 'bold' }} />
+                  <Tooltip 
+                    formatter={(value: any) => [`${value} leads`, 'Count']}
+                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', color: '#000' }} 
+                    itemStyle={{ color: '#000', fontWeight: 'bold' }} 
+                  />
                 </PieChart>
               </ResponsiveContainer>
             ) : (
@@ -217,15 +227,19 @@ export default function Dashboard() {
             )}
           </div>
           <div className="mt-4 space-y-2">
-            {(stats?.outcomeDistribution?.length > 0 ? stats.outcomeDistribution : stats.statusDistribution)?.map((entry: any, index: number) => (
-              <div key={entry.outcome || entry.status} className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
-                  <span className="text-black capitalize">{(entry.outcome || entry.status).replace(/_/g, ' ')}</span>
+            {(stats?.outcomeDistribution?.length > 0 ? stats.outcomeDistribution : stats.statusDistribution)?.map((entry: any, index: number) => {
+              const name = (entry.outcome || entry.status || 'Unknown').replace(/_/g, ' ');
+              return (
+                <div key={entry.outcome || entry.status || index} className="flex items-center justify-between text-sm py-1 border-b border-slate-50 last:border-0 hover:bg-slate-50 px-2 rounded-lg transition-colors">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
+                    <span className="text-black font-medium capitalize prose-sm">
+                      {name}: <span className="font-bold">{entry.count} Leads</span>
+                    </span>
+                  </div>
                 </div>
-                <span className="font-bold text-black">{entry.count}</span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
