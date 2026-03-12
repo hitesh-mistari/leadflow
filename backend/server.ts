@@ -84,6 +84,9 @@ const initDB = async () => {
         await client.query(`
           ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT '';
           ALTER TABLE leads ADD COLUMN IF NOT EXISTS city TEXT;
+          ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_called_by INTEGER REFERENCES users(id);
+          ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id);
+          ALTER TABLE leads ADD COLUMN IF NOT EXISTS import_id INTEGER REFERENCES import_history(id) ON DELETE CASCADE;
         `);
 
         // Safe migration for import_history columns
@@ -398,7 +401,12 @@ app.get('/api/leads', authenticateToken, async (req, res) => {
         const safeSortCol = allowedSorts.includes(String(sortBy)) ? String(sortBy) : 'created_at';
         const safeOrder = String(order).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
-        let query = 'SELECT * FROM leads WHERE is_archived IS NOT TRUE';
+        let query = `
+            SELECT l.*, u.name as last_called_by_name 
+            FROM leads l 
+            LEFT JOIN users u ON l.last_called_by = u.id 
+            WHERE l.is_archived IS NOT TRUE
+        `;
         let countQuery = 'SELECT COUNT(*) FROM leads WHERE is_archived IS NOT TRUE';
         const params: any[] = [];
         let paramIndex = 1;
@@ -572,9 +580,18 @@ app.post('/api/leads/import', authenticateToken, async (req: any, res) => {
     const client = await pool.connect();
     let importedCount = 0;
     let skippedCount = 0;
+    let importId: number | null = null;
 
     try {
         await client.query('BEGIN');
+
+        // Create the import record first to get an ID for cascading link
+        const importRes = await client.query(
+            `INSERT INTO import_history (filename, total_records, imported_by, status, city, file_size)
+             VALUES ($1, $2, $3, 'processing', $4, $5) RETURNING id`,
+            [filename, leads.length, req.user?.email || 'unknown', city, fileSize]
+        );
+        importId = importRes.rows[0].id;
 
         for (const raw of leads) {
             // ── Ultra-Flexible field mapping helper ──
@@ -680,8 +697,8 @@ app.post('/api/leads/import', authenticateToken, async (req: any, res) => {
                 await client.query(`SAVEPOINT sp_${importedCount + skippedCount}`);
                 const result = await client.query(
                     `INSERT INTO leads (place_id, name, description, phone, website, rating, reviews, address,
-                      latitude, longitude, main_category, categories, workday_timing, is_temporarily_closed, city)
-                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                      latitude, longitude, main_category, categories, workday_timing, is_temporarily_closed, city, import_id)
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
                      ON CONFLICT (place_id) DO UPDATE SET
                        name = EXCLUDED.name,
                        description = EXCLUDED.description,
@@ -696,10 +713,11 @@ app.post('/api/leads/import', authenticateToken, async (req: any, res) => {
                        categories = EXCLUDED.categories,
                        workday_timing = EXCLUDED.workday_timing,
                        is_temporarily_closed = EXCLUDED.is_temporarily_closed,
-                       city = EXCLUDED.city
+                       city = EXCLUDED.city,
+                       import_id = EXCLUDED.import_id
                      RETURNING id`,
                     [place_id, name, description, phone, website, rating, reviews, address,
-                        latitude, longitude, main_category, categoriesStr, workday_timing, is_temporarily_closed, leadCity]
+                        latitude, longitude, main_category, categoriesStr, workday_timing, is_temporarily_closed, leadCity, importId]
                 );
                 await client.query(`RELEASE SAVEPOINT sp_${importedCount + skippedCount}`);
                 if (result.rowCount && result.rowCount > 0) {
@@ -714,11 +732,10 @@ app.post('/api/leads/import', authenticateToken, async (req: any, res) => {
             }
         }
 
-        // Log import in history
+        // Update import record with final status and counts
         await client.query(
-            `INSERT INTO import_history (filename, total_records, imported_count, skipped_count, imported_by, status, city, file_size)
-             VALUES ($1, $2, $3, $4, $5, 'success', $6, $7)`,
-            [filename, leads.length, importedCount, skippedCount, req.user?.email || 'unknown', city, fileSize]
+            `UPDATE import_history SET imported_count = $1, skipped_count = $2, status = 'success' WHERE id = $3`,
+            [importedCount, skippedCount, importId]
         );
 
         await client.query('COMMIT');
@@ -807,14 +824,17 @@ app.put('/api/leads/:id', authenticateToken, validateId, async (req, res) => {
 
     // Auto-update last_called and log activity if status changed manually
     if (isStatusChanging) {
+        const userId = (req as any).user.id;
         if (req.body.last_called === undefined) {
             setClauses.push(`last_called = NOW()`);
             setClauses.push(`call_attempts = call_attempts + 1`);
+            setClauses.push(`last_called_by = $${i++}`);
+            values.push(userId);
         }
         // Log this interaction so it appears in charts and history
         await pool.query(
-            'INSERT INTO call_logs (lead_id, duration, outcome, notes) VALUES ($1, $2, $3, $4)',
-            [req.params.id, 0, req.body.status, `Status changed to ${req.body.status}`]
+            'INSERT INTO call_logs (lead_id, user_id, duration, outcome, notes) VALUES ($1, $2, $3, $4, $5)',
+            [req.params.id, userId, 0, req.body.status, `Status changed to ${req.body.status}`]
         );
     }
 
@@ -859,15 +879,16 @@ app.get('/api/leads/duplicate-check', authenticateToken, async (req, res) => {
 });
 
 // ─── Call Log Routes ───────────────────────────────────────────────────────────
-app.post('/api/calls', authenticateToken, async (req, res) => {
+app.post('/api/calls', authenticateToken, async (req: any, res) => {
     const { lead_id, duration, outcome, notes } = req.body;
+    const userId = req.user.id;
     await pool.query(
-        `INSERT INTO call_logs (lead_id, duration, outcome, notes) VALUES ($1,$2,$3,$4)`,
-        [lead_id, duration, outcome, notes]
+        `INSERT INTO call_logs (lead_id, user_id, duration, outcome, notes) VALUES ($1,$2,$3,$4,$5)`,
+        [lead_id, userId, duration, outcome, notes]
     );
     await pool.query(
-        `UPDATE leads SET last_called = NOW(), call_attempts = call_attempts + 1 WHERE id = $1`,
-        [lead_id]
+        `UPDATE leads SET last_called = NOW(), call_attempts = call_attempts + 1, last_called_by = $2 WHERE id = $1`,
+        [lead_id, userId]
     );
     res.status(201).json({ message: 'Call logged' });
 });
