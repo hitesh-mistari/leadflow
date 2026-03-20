@@ -5,7 +5,6 @@ import pkg from 'pg';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 
-import { initWhatsApp, isWhatsAppReady, whatsappQrCodeUrl, sendWhatsAppMessage } from './whatsapp';
 
 
 
@@ -1104,27 +1103,6 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
 initDB().then(() => {
-    // ─── WhatsApp Headless Routes ─────────────────────────────────────────────────
-    app.get('/api/whatsapp/status', authenticateToken, (req: any, res: any) => {
-        res.json({
-            ready: isWhatsAppReady,
-            qr: whatsappQrCodeUrl
-        });
-    });
-
-    app.post('/api/whatsapp/send', authenticateToken, async (req: any, res: any) => {
-        const { phone, text, attachPromo } = req.body;
-        if (!phone || !text) {
-            return res.status(400).json({ error: 'Phone and text strings are strictly required for WhatsApp API.' });
-        }
-        
-        try {
-            const result = await sendWhatsAppMessage(phone, text, attachPromo);
-            res.json(result);
-        } catch (err: any) {
-            res.status(500).json({ error: err.message || 'Failed to dispatch via WhatsApp Web API' });
-        }
-    });
 
     app.listen(PORT, () => {
         console.log(`🚀 LeadFlow Backend running on http://localhost:${PORT}`);
@@ -1136,5 +1114,3 @@ initDB().then(() => {
     process.exit(1);
 });
 
-// Engage headless browser robot simultaneously with Postgres initialization
-initWhatsApp();
