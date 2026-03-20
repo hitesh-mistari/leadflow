@@ -15,6 +15,11 @@ const pool = new Pool({
     ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
 });
 
+// Prevent unhandled idle client errors from crashing the entire backend process
+pool.on('error', (err, client) => {
+    console.error('⚠️ Unexpected error on idle PostgreSQL client:', err.message);
+});
+
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
 const PORT = process.env.PORT || 3001;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
@@ -87,6 +92,7 @@ const initDB = async () => {
           ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_called_by INTEGER REFERENCES users(id);
           ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id);
           ALTER TABLE leads ADD COLUMN IF NOT EXISTS import_id INTEGER REFERENCES import_history(id) ON DELETE CASCADE;
+          ALTER TABLE leads ADD COLUMN IF NOT EXISTS assigned_to INTEGER REFERENCES users(id);
         `);
 
         // Safe migration for import_history columns
@@ -101,22 +107,10 @@ const initDB = async () => {
         console.log('✅ import_history schema verified');
         console.log('✅ import_history table ready');
 
-        // Safe: seed default admin if admin user doesn't exist
-        const { rows: userCount } = await client.query("SELECT COUNT(*) as count FROM users WHERE email = 'admin@leadflow.com'");
+        // Check if any users exist to ensure the system is usable
+        const { rows: userCount } = await client.query("SELECT COUNT(*) as count FROM users");
         if (parseInt(userCount[0].count) === 0) {
-            console.log('👤 No users found — creating default admin account...');
-            const DEFAULT_USERS = [
-                { name: 'Admin', email: 'admin@leadflow.com', password: 'Admin@123' },
-                { name: 'Ravi Kumar', email: 'ravi@leadflow.com', password: 'Ravi@123' },
-            ];
-            for (const u of DEFAULT_USERS) {
-                const hashed = await bcrypt.hash(u.password, 10);
-                await client.query(
-                    `INSERT INTO users (name, email, password) VALUES ($1, $2, $3) ON CONFLICT (email) DO NOTHING`,
-                    [u.name, u.email.toLowerCase(), hashed]
-                );
-            }
-            console.log('✅ Default users created: admin@leadflow.com / Admin@123');
+            console.log('⚠️ No users found in database. Please ensure teammates are created.');
         }
 
         // Removed automatic seeding to allow for clean database
@@ -404,7 +398,7 @@ app.post('/api/stages', authenticateToken, async (req, res) => {
 app.get('/api/leads', authenticateToken, async (req, res) => {
     try {
         const {
-            page = 1, limit = 10, search, status, city, called_by,
+            page = 1, limit = 10, search, status, city, called_by, assigned_to,
             sortBy = 'created_at', order = 'desc', from, to
         } = req.query;
         const offset = (Number(page) - 1) * Number(limit);
@@ -413,9 +407,10 @@ app.get('/api/leads', authenticateToken, async (req, res) => {
         const safeOrder = String(order).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
         let query = `
-            SELECT l.*, u.name as last_called_by_name 
+            SELECT l.*, u.name as last_called_by_name, a.name as assigned_to_name
             FROM leads l 
             LEFT JOIN users u ON l.last_called_by = u.id 
+            LEFT JOIN users a ON l.assigned_to = a.id
             WHERE l.is_archived IS NOT TRUE
         `;
         let countQuery = 'SELECT COUNT(*) FROM leads WHERE is_archived IS NOT TRUE';
@@ -423,42 +418,54 @@ app.get('/api/leads', authenticateToken, async (req, res) => {
         let paramIndex = 1;
 
         if (status) {
-            query += ` AND status = $${paramIndex}`;
+            query += ` AND l.status = $${paramIndex}`;
             countQuery += ` AND status = $${paramIndex}`;
             params.push(status);
             paramIndex++;
         }
 
         if (city) {
-            query += ` AND city = $${paramIndex}`;
+            query += ` AND l.city = $${paramIndex}`;
             countQuery += ` AND city = $${paramIndex}`;
             params.push(city);
             paramIndex++;
         }
 
         if (search) {
-            query += ` AND (name ILIKE $${paramIndex} OR phone ILIKE $${paramIndex} OR address ILIKE $${paramIndex} OR main_category ILIKE $${paramIndex})`;
+            query += ` AND (l.name ILIKE $${paramIndex} OR l.phone ILIKE $${paramIndex} OR l.address ILIKE $${paramIndex} OR l.main_category ILIKE $${paramIndex})`;
             countQuery += ` AND (name ILIKE $${paramIndex} OR phone ILIKE $${paramIndex} OR address ILIKE $${paramIndex} OR main_category ILIKE $${paramIndex})`;
             params.push(`%${search}%`);
             paramIndex++;
         }
 
         if (called_by) {
-            query += ` AND last_called_by = $${paramIndex}`;
+            query += ` AND l.last_called_by = $${paramIndex}`;
             countQuery += ` AND last_called_by = $${paramIndex}`;
             params.push(called_by);
             paramIndex++;
         }
 
+        if (assigned_to) {
+            if (assigned_to === 'unassigned') {
+                query += ` AND l.assigned_to IS NULL`;
+                countQuery += ` AND assigned_to IS NULL`;
+            } else {
+                query += ` AND l.assigned_to = $${paramIndex}`;
+                countQuery += ` AND assigned_to = $${paramIndex}`;
+                params.push(assigned_to);
+                paramIndex++;
+            }
+        }
+
         if (from) {
-            query += ` AND created_at >= $${paramIndex}`;
+            query += ` AND l.created_at >= $${paramIndex}`;
             countQuery += ` AND created_at >= $${paramIndex}`;
             params.push(from);
             paramIndex++;
         }
 
         if (to) {
-            query += ` AND created_at <= $${paramIndex}::date + INTERVAL '1 day'`;
+            query += ` AND l.created_at <= $${paramIndex}::date + INTERVAL '1 day'`;
             countQuery += ` AND created_at <= $${paramIndex}::date + INTERVAL '1 day'`;
             params.push(to);
             paramIndex++;
@@ -813,10 +820,99 @@ app.delete('/api/imports/:id', authenticateToken, async (req, res) => {
     res.json({ message: 'Import history entry deleted' });
 });
 
+app.get('/api/leads/pending-count', authenticateToken, async (req: any, res) => {
+    try {
+        const userId = req.user.id;
+        const result = await pool.query(
+            `SELECT COUNT(*) as count FROM leads WHERE assigned_to = $1 AND status = 'not_called' AND is_archived IS NOT TRUE`,
+             [userId]
+        );
+        res.json({ count: parseInt(result.rows[0].count) });
+    } catch (err) {
+        console.error('Pending count error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
 app.get('/api/leads/:id', authenticateToken, validateId, async (req: any, res) => {
-    const { rows } = await pool.query('SELECT * FROM leads WHERE id = $1', [req.params.id]);
+    const { rows } = await pool.query(`
+        SELECT l.*, a.name as assigned_to_name 
+        FROM leads l 
+        LEFT JOIN users a ON l.assigned_to = a.id 
+        WHERE l.id = $1
+    `, [req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'Lead not found' });
     res.json(rows[0]);
+});
+
+// Batch Assign Endpoint
+app.post('/api/leads/assign-batch', authenticateToken, async (req: any, res) => {
+    try {
+        const { user_id, count = 100 } = req.body;
+        if (!user_id) return res.status(400).json({ error: 'User ID is required' });
+        
+        const limitCount = Math.min(Math.max(Number(count) || 100, 1), 1000);
+
+        const updateQuery = `
+            UPDATE leads
+            SET assigned_to = $1
+            WHERE id IN (
+                SELECT id FROM leads 
+                WHERE assigned_to IS NULL 
+                  AND is_archived IS NOT TRUE 
+                  AND status = 'not_called'
+                ORDER BY created_at ASC
+                LIMIT $2
+                FOR UPDATE SKIP LOCKED
+            )
+            RETURNING id
+        `;
+        
+        const { rows } = await pool.query(updateQuery, [user_id, limitCount]);
+        res.json({ message: `Successfully assigned ${rows.length} leads`, assigned_count: rows.length });
+    } catch (err: any) {
+        console.error('Batch assign error:', err);
+        res.status(500).json({ error: 'Server error during batch assignment' });
+    }
+});
+
+// Self-Assign Next Batch Endpoint
+app.post('/api/leads/assign-self', authenticateToken, async (req: any, res) => {
+    try {
+        const userId = req.user.id;
+        const count = 100;
+
+        // Check if user still has pending (not_called) leads
+        const pendingCheck = await pool.query(
+            `SELECT COUNT(*) as count FROM leads WHERE assigned_to = $1 AND status = 'not_called' AND is_archived IS NOT TRUE`,
+             [userId]
+        );
+        
+        if (parseInt(pendingCheck.rows[0].count) > 0) {
+            return res.status(400).json({ error: 'You still have not_called leads in your current batch. Finish them before requesting a new batch.' });
+        }
+
+        const updateQuery = `
+            UPDATE leads
+            SET assigned_to = $1
+            WHERE id IN (
+                SELECT id FROM leads 
+                WHERE assigned_to IS NULL 
+                  AND is_archived IS NOT TRUE 
+                  AND status = 'not_called'
+                ORDER BY created_at ASC
+                LIMIT $2
+                FOR UPDATE SKIP LOCKED
+            )
+            RETURNING id
+        `;
+        
+        const { rows } = await pool.query(updateQuery, [userId, count]);
+        res.json({ message: `Successfully claimed ${rows.length} new leads`, assigned_count: rows.length });
+    } catch (err: any) {
+        console.error('Self assign error:', err);
+        res.status(500).json({ error: 'Server error during self assignment' });
+    }
 });
 
 app.put('/api/leads/:id', authenticateToken, validateId, async (req, res) => {

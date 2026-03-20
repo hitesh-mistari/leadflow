@@ -29,11 +29,12 @@ async function migrate() {
                 INSERT INTO pipeline_stages (name, label, color, position) VALUES
                 ('not_called', 'Not Called', 'slate', 0),
                 ('called_no_response', 'Called (No Response)', 'amber', 1),
-                ('follow_up', 'Follow Up', 'blue', 2),
-                ('interested', 'Interested', 'rose', 3),
-                ('converted', 'Converted', 'emerald', 4),
-                ('not_interested', 'Not Interested', 'red', 5),
-                ('closed', 'Closed', 'slate', 6)
+                ('called_busy', 'Called (Busy)', 'amber', 2),
+                ('follow_up', 'Follow Up', 'blue', 3),
+                ('interested', 'Interested', 'rose', 4),
+                ('converted', 'Converted', 'emerald', 5),
+                ('not_interested', 'Not Interested', 'red', 6),
+                ('closed', 'Closed', 'slate', 7)
             `);
         }
         console.log('Migration complete!');
