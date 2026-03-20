@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../services/api';
+import { useToast } from '../context/ToastContext';
 import {
   Phone,
   MapPin,
@@ -44,99 +45,49 @@ const formatPhoneForWA = (phone: string) => {
   return cleaned;
 };
 
-const WAModal = ({ phone, name, onClose }: { phone: string; name: string; onClose: () => void }) => {
-  const [msg, setMsg] = useState(`Hi ${name}, I wanted to connect with you regarding your business.`);
-  const [checking, setChecking] = useState(false);
-  const [notAvail, setNotAvail] = useState(false);
-  const fp = formatPhoneForWA(phone);
+// Inline WhatsApp button used inside LeadDetails
+const WAButtonInline = ({ phone, name }: { phone: string; name: string }) => {
+  const { info, error } = useToast();
+  const [loading, setLoading] = useState(false);
 
-  const open = () => {
-    if (!fp || fp.length < 7) { setNotAvail(true); return; }
-    setChecking(true);
-    const win = window.open(`https://wa.me/${fp}?text=${encodeURIComponent(msg)}`, '_blank');
-    setTimeout(() => {
-      setChecking(false);
-      if (!win || win.closed || typeof win.closed === 'undefined') setNotAvail(true);
-      else onClose();
-    }, 1500);
+  const sendPromo = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (loading) return;
+    setLoading(true);
+
+    const text = `Hi ${name}, we have made something for you \n\nIf you have 2 minutes please watch this :\n\nhttps://youtu.be/lUzcp1WUymU`;
+    const cleaned = phone.replace(/\D/g, '');
+    const num = cleaned.startsWith('0') ? '91' + cleaned.slice(1) : (cleaned.length === 10 ? '91' + cleaned : cleaned);
+
+    try {
+        const res = await fetch('/promo.png');
+        if (res.ok) {
+            const blob = await res.blob();
+            await navigator.clipboard.write([
+                new ClipboardItem({ [blob.type]: blob })
+            ]);
+            info('Image auto-copied! Just hit Ctrl+V in WhatsApp.');
+        } else {
+            console.warn("promo.jpg not found in frontend/public");
+        }
+    } catch(err: any) {
+        console.error('Clipboard injection failed:', err);
+    } finally {
+        setLoading(false);
+        window.open(`https://wa.me/${num}?text=${encodeURIComponent(text)}`, '_blank');
+    }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden" style={{ animation: 'fadeInUp .2s ease' }}>
-        <div className="flex items-center justify-between gap-3 px-6 py-5" style={{ background: 'linear-gradient(135deg,#25D366,#128C7E)' }}>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center text-white">
-              <WhatsAppIcon size={22} />
-            </div>
-            <div>
-              <h3 className="text-white font-bold text-lg">WhatsApp Message</h3>
-              <p className="text-white/80 text-sm">{name}</p>
-            </div>
-          </div>
-          <button onClick={onClose} className="text-white/80 hover:text-white"><X size={20} /></button>
-        </div>
-        <div className="p-6 space-y-4">
-          {notAvail ? (
-            <div className="flex flex-col items-center text-center py-4 space-y-4">
-              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center">
-                <AlertTriangle size={32} className="text-red-500" />
-              </div>
-              <div>
-                <h4 className="text-lg font-bold text-slate-900">Not on WhatsApp</h4>
-                <p className="text-slate-500 text-sm mt-1">The number <span className="font-bold text-slate-700">{phone}</span> does not appear to be registered on WhatsApp.</p>
-              </div>
-              <button onClick={() => setNotAvail(false)} className="btn btn-secondary w-full">Try Again</button>
-              <button onClick={onClose} className="text-sm text-slate-400 hover:text-slate-600">Close</button>
-            </div>
-          ) : (
-            <>
-              <div className="flex items-center gap-3 p-3 rounded-xl border" style={{ background: '#25D36610', borderColor: '#25D36630' }}>
-                <Phone size={16} style={{ color: '#25D366' }} />
-                <span className="font-bold text-slate-800">{phone}</span>
-                <span className="text-xs text-slate-400 ml-auto">+{fp}</span>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">Message</label>
-                <textarea value={msg} onChange={e => setMsg(e.target.value)} rows={3}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#25D366] transition-all text-sm resize-none" />
-
-              </div>
-              <p className="text-xs text-slate-400 flex items-start gap-2">
-                <AlertTriangle size={12} className="shrink-0 mt-0.5 text-amber-400" />
-                If the number is not on WhatsApp, you'll see an error from WhatsApp directly.
-              </p>
-              <div className="flex gap-3 pt-2">
-                <button onClick={onClose} className="btn btn-secondary flex-1">Cancel</button>
-                <button onClick={open} disabled={checking} className="btn flex-1 text-white font-bold" style={{ background: 'linear-gradient(135deg,#25D366,#128C7E)' }}>
-                  {checking ? <Loader2 size={18} className="animate-spin mr-2" /> : <WhatsAppIcon size={18} />}
-                  <span className="ml-2">{checking ? 'Opening...' : 'Send on WhatsApp'}</span>
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-      <style>{`@keyframes fadeInUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}`}</style>
-    </div>
-  );
-};
-
-// Inline WhatsApp button used inside LeadDetails
-const WAButtonInline = ({ phone, name }: { phone: string; name: string }) => {
-  const [show, setShow] = useState(false);
-  return (
-    <>
-      <button
-        onClick={() => setShow(true)}
-        title={`WhatsApp ${name}`}
-        className="inline-flex items-center justify-center w-9 h-9 rounded-full text-[#25D366] hover:bg-[#25D366]/10 transition-all hover:scale-110 border border-[#25D366]/30"
-      >
-        <WhatsAppIcon size={18} />
-      </button>
-      {show && <WAModal phone={phone} name={name} onClose={() => setShow(false)} />}
-    </>
+    <button
+      onClick={sendPromo}
+      disabled={loading}
+      title={`Open WhatsApp for ${name}`}
+      className={`inline-flex items-center justify-center w-9 h-9 rounded-full text-[#25D366] hover:bg-[#25D366]/10 transition-all hover:scale-110 border border-[#25D366]/30 ${loading ? 'opacity-50' : ''}`}
+    >
+      {loading ? <div className="w-4 h-4 border-2 border-[#25D366] border-t-transparent rounded-full animate-spin" /> : <WhatsAppIcon size={18} />}
+    </button>
   );
 };
 
@@ -191,6 +142,11 @@ export default function LeadDetails() {
       setCallDuration(prev => prev + 1);
     }, 1000);
     setTimerInterval(interval);
+    
+    // Actually trigger the device's native dialer!
+    if (lead?.phone) {
+      window.location.href = `tel:${lead.phone}`;
+    }
   };
 
   const stopCall = () => {
@@ -310,8 +266,8 @@ export default function LeadDetails() {
           </button>
           {!isCalling ? (
             <button onClick={startCall} className="btn bg-emerald-600 text-white hover:bg-emerald-700 shadow-lg shadow-emerald-200 flex-1 sm:flex-none">
-              <Play size={18} className="mr-2" />
-              Call
+              <Phone size={18} className="mr-2" />
+              Dial & Track
             </button>
           ) : (
             <button onClick={stopCall} className="btn bg-red-600 text-white hover:bg-red-700 shadow-lg shadow-red-200 animate-pulse flex-1 sm:flex-none">

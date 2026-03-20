@@ -17,23 +17,27 @@ import AddLeadModal from '../components/modals/AddLeadModal';
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const STATUS_LABELS: Record<string, string> = {
   not_called: 'Not Called',
+  called: 'Called',
   called_no_response: 'Called — No Response',
   called_busy: 'Called — Busy',
   follow_up: 'Follow Up',
   interested: 'Interested',
   converted: 'Converted',
   not_interested: 'Not Interested',
+  message_sent: 'Message Sent',
   closed: 'Closed',
 };
 
 const STATUS_COLORS: Record<string, string> = {
   not_called: 'bg-purple-100 text-purple-700',
+  called: 'bg-orange-100 text-orange-700',
   called_no_response: 'bg-orange-100 text-orange-700',
   called_busy: 'bg-amber-100 text-amber-700',
   follow_up: 'bg-sky-100 text-sky-700',
   interested: 'bg-pink-100 text-pink-700',
   converted: 'bg-emerald-100 text-emerald-700',
   not_interested: 'bg-red-100 text-red-700',
+  message_sent: 'bg-indigo-100 text-indigo-700',
   closed: 'bg-slate-200 text-slate-700',
 };
 
@@ -52,20 +56,51 @@ const WhatsAppIcon = ({ size = 18 }: { size?: number }) => (
   </svg>
 );
 
-const WhatsAppButton = ({ phone, name, small = false }: { phone: string; name: string; small?: boolean }) => {
-  const cleaned = phone.replace(/\D/g, '');
-  const num = cleaned.startsWith('0') ? '91' + cleaned.slice(1) : (cleaned.length === 10 ? '91' + cleaned : cleaned);
-  const msg = encodeURIComponent(`Hi ${name}, I'm reaching out regarding...`);
+const WhatsAppButton = ({ phone, name, small = false, onSent }: { phone: string; name: string; small?: boolean; onSent?: () => void }) => {
+  const { info, error } = useToast();
+  const [loading, setLoading] = useState(false);
+
+  const sendPromo = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (loading) return;
+    setLoading(true);
+    
+    // Auto-formatting payload
+    const text = `Hi ${name}, we have made something for you \n\nIf you have 2 minutes please watch this :\n\nhttps://youtu.be/lUzcp1WUymU`;
+    const cleaned = phone.replace(/\D/g, '');
+    const num = cleaned.startsWith('0') ? '91' + cleaned.slice(1) : (cleaned.length === 10 ? '91' + cleaned : cleaned);
+    
+    try {
+        // Attempt to stealthily copy the image to the user's clipboard
+        const res = await fetch('/promo.png');
+        if (res.ok) {
+            const blob = await res.blob();
+            await navigator.clipboard.write([
+                new ClipboardItem({ [blob.type]: blob })
+            ]);
+            info('Image auto-copied to clipboard! Just hit Ctrl+V in WhatsApp.');
+        } else {
+            console.warn("promo.jpg not found in frontend/public space");
+        }
+    } catch(err: any) {
+        console.error('Clipboard injection failed:', err);
+    } finally {
+        setLoading(false);
+        if (onSent) onSent();
+        window.open(`https://wa.me/${num}?text=${encodeURIComponent(text)}`, '_blank');
+    }
+  };
+
   return (
-    <a
-      href={`https://wa.me/${num}?text=${msg}`}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={`${small ? 'w-7 h-7' : 'w-8 h-8'} bg-green-50 text-green-600 rounded-full flex items-center justify-center hover:bg-green-100`}
-      title="Open WhatsApp"
+    <button
+      onClick={sendPromo}
+      disabled={loading}
+      className={`${small ? 'w-7 h-7' : 'w-8 h-8'} ${loading ? 'opacity-50' : ''} bg-green-50 text-green-600 rounded-full flex items-center justify-center hover:bg-green-100 transition-opacity`}
+      title="Open Native WhatsApp"
     >
-      <WhatsAppIcon size={small ? 12 : 14} />
-    </a>
+      {loading ? <div className="w-3 h-3 border-2 border-green-600 border-t-transparent rounded-full animate-spin" /> : <WhatsAppIcon size={small ? 12 : 14} />}
+    </button>
   );
 };
 
@@ -102,7 +137,9 @@ export default function LeadsTable() {
   const [stages, setStages] = useState<any[]>([]);
   const [page, setPage] = useState(Number(searchParams.get('page') || 1));
   const [pageSize, setPageSize] = useState(Number(searchParams.get('limit') || 10));
-  const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '');
+  const [statusFilter, setStatusFilter] = useState(
+    searchParams.has('status') ? (searchParams.get('status') || '') : 'not_called'
+  );
   const [sortBy, setSortBy] = useState(searchParams.get('sort') || 'created_at');
   const [sortOrder, setSortOrder] = useState<'ASC' | 'DESC'>((searchParams.get('order') as 'ASC' | 'DESC') || 'DESC');
   const [dateFrom, setDateFrom] = useState(searchParams.get('from') || '');
@@ -287,7 +324,14 @@ export default function LeadsTable() {
   const updateStatus = async (id: number, newStatus: string) => {
     const previousLeads = [...leads];
     // Optimistic UI Update: change it immediately on screen!
-    setLeads(prev => prev.map(l => l.id === id ? { ...l, status: newStatus } : l));
+    if (statusFilter && statusFilter !== newStatus) {
+      // If we are filtering by a specific status and it changed to something else, remove it from view
+      setLeads(prev => prev.filter(l => l.id !== id));
+      setTotal(prev => typeof prev === 'number' ? prev - 1 : prev);
+    } else {
+      // If viewing all, or status magically matches the current filter, just update inline
+      setLeads(prev => prev.map(l => l.id === id ? { ...l, status: newStatus } : l));
+    }
     
     try {
       await api.put(`/leads/${id}`, { status: newStatus });
@@ -414,8 +458,23 @@ export default function LeadsTable() {
               Get Next Batch
             </button>
           ) : pendingCount > 0 ? (
-            <button disabled className="btn btn-secondary border-slate-200 text-slate-400 bg-slate-50 cursor-not-allowed font-semibold w-auto" title="You must finish your current leads before getting a new batch">
-              Finish {pendingCount} Pending Leads First
+            <button 
+              onClick={() => {
+                setSearchInput('');
+                setSearchQuery('');
+                setStatusFilter('not_called');
+                setCityFilter('');
+                setCalledByFilter('');
+                setDateFrom('');
+                setDateTo('');
+                if (user?.id) setAssignedToFilter(user.id.toString());
+                setPage(1);
+                syncURL({ q: '', status: 'not_called', city: '', called_by: '', from: '', to: '', assigned_to: user?.id?.toString() || '', page: 1 });
+              }}
+              className="btn btn-secondary border-orange-200 text-orange-700 bg-orange-50 hover:bg-orange-100 font-semibold w-auto focus:ring-2 focus:ring-orange-500 shadow-sm transition-all" 
+              title="Click to clear your filters and view your pending leads"
+            >
+              View {pendingCount} Pending Leads
             </button>
           ) : null}
           <button onClick={() => setShowAddModal(true)} className="btn btn-primary hidden md:inline-flex"><Plus size={18} className="mr-2" />Add Lead</button>
@@ -548,7 +607,7 @@ export default function LeadsTable() {
                           <a href={`tel:${lead.phone}`} className="text-sm font-bold text-black flex items-center gap-1 hover:text-indigo-600 whitespace-nowrap">
                             <Phone size={14} />{lead.phone}
                           </a>
-                          <WhatsAppButton phone={lead.phone} name={lead.name} />
+                          <WhatsAppButton phone={lead.phone} name={lead.name} onSent={() => updateStatus(lead.id, 'message_sent')} />
                         </div>
                       ) : <span className="text-xs text-slate-400">No phone</span>}
                       {lead.website && (
@@ -562,16 +621,15 @@ export default function LeadsTable() {
                     <span className="text-sm text-black font-medium">{lead.main_category}</span>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex flex-col gap-1">
-                      <StatusBadge status={lead.status} />
-                      <select
-                        className={`text-xs font-bold bg-transparent border-none focus:ring-0 p-0 cursor-pointer mt-1 ${STATUS_COLORS[lead.status]?.split(' ')[1] || 'text-slate-600'}`}
-                        value={lead.status}
-                        onChange={(e) => updateStatus(lead.id, e.target.value)}
-                      >
-                        {stages.map(s => <option key={s.name} value={s.name} className={`font-bold ${STATUS_COLORS[s.name]?.split(' ')[1] || 'text-slate-600'}`}>{s.label}</option>)}
-                      </select>
-                    </div>
+                    <select
+                      className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider border-none ring-1 ring-inset ring-black/5 focus:ring-2 focus:ring-indigo-500 cursor-pointer transition-colors w-full sm:max-w-fit ${STATUS_COLORS[lead.status] || 'bg-slate-100 text-slate-600'}`}
+                      value={lead.status}
+                      onChange={(e) => updateStatus(lead.id, e.target.value)}
+                      style={{ appearance: 'none', WebkitAppearance: 'none', textAlign: 'center' }}
+                      title="Click to quickly change status"
+                    >
+                      {stages.map(s => <option key={s.name} value={s.name} className="font-bold text-slate-700 bg-white normal-case tracking-normal text-sm">{s.label}</option>)}
+                    </select>
                   </td>
                   <td className="px-6 py-4">
                     <span className="text-xs text-black font-medium">{new Date(lead.created_at).toLocaleDateString()}</span>

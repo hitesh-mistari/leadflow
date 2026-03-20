@@ -152,12 +152,14 @@ export default function AddLeadModal({ onClose, onSuccess }: AddLeadModalProps) 
                                     ) : (
                                         <>
                                             <option value="not_called">Not Called</option>
+                                            <option value="called">Called</option>
                                             <option value="called_no_response">Called (No Response)</option>
                                             <option value="called_busy">Called (Busy)</option>
                                             <option value="follow_up">Follow Up</option>
                                             <option value="interested">Interested</option>
                                             <option value="converted">Converted</option>
                                             <option value="not_interested">Not Interested</option>
+                                            <option value="message_sent">Message Sent</option>
                                             <option value="closed">Closed</option>
                                         </>
                                     )}
