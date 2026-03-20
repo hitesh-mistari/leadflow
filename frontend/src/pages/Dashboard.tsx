@@ -165,7 +165,7 @@ export default function Dashboard() {
           </div>
           <div className="h-[250px] sm:h-[300px] flex items-center justify-center">
             {chartData.hasActivity ? (
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                 <LineChart data={chartData.data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: '#000000', fontSize: 10, fontWeight: 'bold' }} dy={10}
@@ -193,9 +193,9 @@ export default function Dashboard() {
             <span className="text-[10px] font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">Lead Distribution</span>
           </h3>
           <p className="text-[10px] text-slate-400 mb-6 font-medium uppercase tracking-tight">How your leads are distributed across states</p>
-          <div className="h-[200px] sm:h-[250px] relative flex items-center justify-center">
+          <div className="h-[200px] sm:h-[250px] relative flex items-center justify-center w-full">
             { (stats?.outcomeDistribution?.length > 0 || stats?.statusDistribution?.length > 0) ? (
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                 <PieChart>
                   <Pie 
                     data={stats?.outcomeDistribution?.length > 0 ? stats.outcomeDistribution : stats.statusDistribution} 

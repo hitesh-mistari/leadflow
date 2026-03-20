@@ -25,7 +25,8 @@ import {
   MicOff,
   X,
   AlertTriangle,
-  Edit
+  Edit,
+  User
 } from 'lucide-react';
 import EditLeadModal from '../components/modals/EditLeadModal';
 
@@ -519,6 +520,17 @@ export default function LeadDetails() {
 
         {/* Right Column: Status & Map */}
         <div className="space-y-8">
+          {/* Assignment Info */}
+          <div className="card p-6 border-indigo-100 bg-indigo-50/50">
+            <h3 className="text-sm font-bold text-indigo-900 mb-1 flex items-center gap-2">
+              <User size={16} className="text-indigo-600" />
+              Assigned To
+            </h3>
+            <p className="text-lg font-bold text-indigo-700">
+              {lead.assigned_to_name || <span className="text-slate-400 italic font-normal text-base">Unassigned</span>}
+            </p>
+          </div>
+
           <div className="card p-8">
             <h3 className="text-lg font-bold text-black mb-6">Pipeline Status</h3>
             <div className="space-y-3">

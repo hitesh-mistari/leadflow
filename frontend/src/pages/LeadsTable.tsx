@@ -11,12 +11,14 @@ import {
 import { Link, useSearchParams } from 'react-router-dom';
 import { useSearch } from '../context/SearchContext';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import AddLeadModal from '../components/modals/AddLeadModal';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const STATUS_LABELS: Record<string, string> = {
   not_called: 'Not Called',
   called_no_response: 'Called — No Response',
+  called_busy: 'Called — Busy',
   follow_up: 'Follow Up',
   interested: 'Interested',
   converted: 'Converted',
@@ -25,10 +27,11 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  not_called: 'bg-slate-100 text-slate-600',
-  called_no_response: 'bg-amber-100 text-amber-700',
-  follow_up: 'bg-blue-100 text-blue-700',
-  interested: 'bg-rose-100 text-rose-700',
+  not_called: 'bg-purple-100 text-purple-700',
+  called_no_response: 'bg-orange-100 text-orange-700',
+  called_busy: 'bg-amber-100 text-amber-700',
+  follow_up: 'bg-sky-100 text-sky-700',
+  interested: 'bg-pink-100 text-pink-700',
   converted: 'bg-emerald-100 text-emerald-700',
   not_interested: 'bg-red-100 text-red-700',
   closed: 'bg-slate-200 text-slate-700',
@@ -49,7 +52,7 @@ const WhatsAppIcon = ({ size = 18 }: { size?: number }) => (
   </svg>
 );
 
-const WhatsAppButton = ({ phone, name }: { phone: string; name: string }) => {
+const WhatsAppButton = ({ phone, name, small = false }: { phone: string; name: string; small?: boolean }) => {
   const cleaned = phone.replace(/\D/g, '');
   const num = cleaned.startsWith('0') ? '91' + cleaned.slice(1) : (cleaned.length === 10 ? '91' + cleaned : cleaned);
   const msg = encodeURIComponent(`Hi ${name}, I'm reaching out regarding...`);
@@ -58,10 +61,10 @@ const WhatsAppButton = ({ phone, name }: { phone: string; name: string }) => {
       href={`https://wa.me/${num}?text=${msg}`}
       target="_blank"
       rel="noopener noreferrer"
-      className="w-8 h-8 bg-green-50 text-green-600 rounded-full flex items-center justify-center hover:bg-green-100"
+      className={`${small ? 'w-7 h-7' : 'w-8 h-8'} bg-green-50 text-green-600 rounded-full flex items-center justify-center hover:bg-green-100`}
       title="Open WhatsApp"
     >
-      <WhatsAppIcon size={14} />
+      <WhatsAppIcon size={small ? 12 : 14} />
     </a>
   );
 };
@@ -91,6 +94,7 @@ export default function LeadsTable() {
   const { searchQuery, setSearchQuery } = useSearch();
   const [searchParams, setSearchParams] = useSearchParams();
   const { success, error: toastError, info } = useToast();
+  const { user } = useAuth();
 
   // Read URL state
   const [leads, setLeads] = useState<any[]>([]);
@@ -104,12 +108,23 @@ export default function LeadsTable() {
   const [dateFrom, setDateFrom] = useState(searchParams.get('from') || '');
   const [dateTo, setDateTo] = useState(searchParams.get('to') || '');
   const [loading, setLoading] = useState(true);
+  const [searchInput, setSearchInput] = useState(searchParams.get('q') || '');
+  const [pendingCount, setPendingCount] = useState<number>(-1);
   const [importing, setImporting] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [cities, setCities] = useState<string[]>([]);
   const [cityFilter, setCityFilter] = useState(searchParams.get('city') || '');
   const [teammates, setTeammates] = useState<any[]>([]);
   const [calledByFilter, setCalledByFilter] = useState(searchParams.get('called_by') || '');
+  const [assignedToFilter, setAssignedToFilter] = useState(
+    searchParams.has('assigned_to') ? (searchParams.get('assigned_to') || '') : (user?.id?.toString() || '')
+  );
+
+  useEffect(() => {
+    if (user?.id && !searchParams.has('assigned_to') && !assignedToFilter) {
+      setAssignedToFilter(user.id.toString());
+    }
+  }, [user?.id, searchParams, assignedToFilter]);
 
   // Bulk select
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -126,15 +141,40 @@ export default function LeadsTable() {
     const params: Record<string, string> = {};
     if (page > 1 || overrides.page) params.page = String(overrides.page ?? page);
     if (pageSize !== 10 || overrides.limit) params.limit = String(overrides.limit ?? pageSize);
+    
+    const currentQ = overrides.q !== undefined ? String(overrides.q) : searchQuery;
+    if (currentQ) params.q = currentQ;
+
     if (statusFilter || overrides.status !== undefined) params.status = String(overrides.status ?? statusFilter);
     if (cityFilter || overrides.city !== undefined) params.city = String(overrides.city ?? cityFilter);
     if (calledByFilter || overrides.called_by !== undefined) params.called_by = String(overrides.called_by ?? calledByFilter);
+    if (assignedToFilter || overrides.assigned_to !== undefined) params.assigned_to = String(overrides.assigned_to ?? assignedToFilter);
     if (dateFrom || overrides.from) params.from = String(overrides.from ?? dateFrom);
     if (dateTo || overrides.to) params.to = String(overrides.to ?? dateTo);
     if (sortBy !== 'created_at') params.sort = String(overrides.sort ?? sortBy);
     if (sortOrder !== 'DESC') params.order = String(overrides.order ?? sortOrder);
     setSearchParams(params, { replace: true });
-  }, [page, pageSize, statusFilter, dateFrom, dateTo, sortBy, sortOrder, setSearchParams]);
+  }, [page, pageSize, statusFilter, cityFilter, calledByFilter, assignedToFilter, dateFrom, dateTo, sortBy, sortOrder, searchQuery, setSearchParams]);
+
+  useEffect(() => {
+    const delay = setTimeout(() => {
+      if (searchQuery !== searchInput) {
+        setSearchQuery(searchInput);
+        setPage(1);
+        syncURL({ q: searchInput, page: 1 });
+      }
+    }, 400);
+    return () => clearTimeout(delay);
+  }, [searchInput, searchQuery, syncURL]);
+
+  const fetchPendingCount = async () => {
+    try {
+      const { data } = await api.get('/leads/pending-count');
+      setPendingCount(data.count);
+    } catch {
+      // ignore
+    }
+  };
 
   const fetchLeads = async () => {
     setLoading(true);
@@ -146,15 +186,17 @@ export default function LeadsTable() {
         status: statusFilter, 
         city: cityFilter, 
         called_by: calledByFilter,
+        assigned_to: assignedToFilter,
         sort: sortBy, 
         order: sortOrder 
       };
       if (dateFrom) params.from = dateFrom;
       if (dateTo) params.to = dateTo;
       const { data } = await api.get('/leads', { params });
-      setLeads(data.leads);
-      setTotal(data.total);
+      setLeads(data?.leads || []);
+      setTotal(data?.total || 0);
       setSelectedIds(new Set()); // clear selection on page change
+      fetchPendingCount();
     } catch (err) {
       toastError('Failed to load leads');
     } finally {
@@ -183,7 +225,7 @@ export default function LeadsTable() {
     } catch (_) { }
   };
 
-  useEffect(() => { fetchLeads(); }, [page, pageSize, statusFilter, cityFilter, calledByFilter, searchQuery, sortBy, sortOrder, dateFrom, dateTo]);
+  useEffect(() => { fetchLeads(); }, [page, pageSize, statusFilter, cityFilter, calledByFilter, assignedToFilter, searchQuery, sortBy, sortOrder, dateFrom, dateTo]);
   useEffect(() => {
     fetchStages();
     fetchCities();
@@ -243,12 +285,48 @@ export default function LeadsTable() {
   };
 
   const updateStatus = async (id: number, newStatus: string) => {
+    const previousLeads = [...leads];
+    // Optimistic UI Update: change it immediately on screen!
+    setLeads(prev => prev.map(l => l.id === id ? { ...l, status: newStatus } : l));
+    
     try {
       await api.put(`/leads/${id}`, { status: newStatus });
-      setLeads(prev => prev.map(l => l.id === id ? { ...l, status: newStatus } : l));
       info('Status updated');
+      
+      const prevStatus = previousLeads.find(l => l.id === id)?.status;
+      if (prevStatus === 'not_called' || newStatus === 'not_called') {
+        fetchPendingCount();
+      }
     } catch {
+      // Revert the UI if the network request fails
+      setLeads(previousLeads);
       toastError('Failed to update status');
+    }
+  };
+
+  const loadMyBatch = () => {
+    const myId = user?.id?.toString();
+    if (myId) {
+      setAssignedToFilter(myId);
+      setPage(1);
+      syncURL({ assigned_to: myId, page: 1 });
+    }
+  };
+
+  const assignSelf = async () => {
+    try {
+      const { data } = await api.post('/leads/assign-self');
+      success('Batch Assigned', data.message);
+      fetchPendingCount();
+      loadMyBatch();
+    } catch (err: any) {
+      if (err.response?.data?.error?.includes('still have not_called leads in your current batch')) {
+        // If they just tried to get a new batch but haven't finished the old one, auto-filter to their existing batch to help them!
+        info('Filter Applied', 'Viewing your current pending batch.');
+        loadMyBatch();
+      } else {
+        toastError(err.response?.data?.error || 'Failed to get next batch');
+      }
     }
   };
 
@@ -302,6 +380,7 @@ export default function LeadsTable() {
       if (searchQuery) qp.append('search', searchQuery);
       if (statusFilter) qp.append('status', statusFilter);
       if (cityFilter) qp.append('city', cityFilter);
+      if (assignedToFilter) qp.append('assigned_to', assignedToFilter);
       if (dateFrom) qp.append('from', dateFrom);
       if (dateTo) qp.append('to', dateTo);
       const resp = await fetch(`/api/leads/export?${qp}`, { headers: { Authorization: `Bearer ${token}` } });
@@ -325,12 +404,21 @@ export default function LeadsTable() {
     <div className="space-y-4">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
+        <div className="hidden md:block">
           <h1 className="text-2xl font-bold text-black">Leads Management</h1>
-          <p className="text-black text-sm">{total.toLocaleString()} total leads in your pipeline</p>
+          <p className="text-black text-sm">{(total || 0).toLocaleString()} total leads in your pipeline</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button onClick={() => setShowAddModal(true)} className="btn btn-primary"><Plus size={18} className="mr-2" />Add Lead</button>
+          {pendingCount === 0 ? (
+            <button onClick={assignSelf} className="btn btn-secondary border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 font-semibold" title="Assign the next 100 leads to yourself">
+              Get Next Batch
+            </button>
+          ) : pendingCount > 0 ? (
+            <button disabled className="btn btn-secondary border-slate-200 text-slate-400 bg-slate-50 cursor-not-allowed font-semibold w-auto" title="You must finish your current leads before getting a new batch">
+              Finish {pendingCount} Pending Leads First
+            </button>
+          ) : null}
+          <button onClick={() => setShowAddModal(true)} className="btn btn-primary hidden md:inline-flex"><Plus size={18} className="mr-2" />Add Lead</button>
         </div>
       </div>
 
@@ -338,9 +426,9 @@ export default function LeadsTable() {
       {selectedIds.size > 0 && (
         <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 flex flex-wrap items-center gap-3">
           <span className="font-bold text-indigo-700 text-sm">{selectedIds.size} lead{selectedIds.size > 1 ? 's' : ''} selected</span>
-          <select className="input py-1.5 text-sm w-48" value={bulkStatus} onChange={e => setBulkStatus(e.target.value)}>
-            <option value="">Change status to…</option>
-            {stages.map(s => <option key={s.name} value={s.name}>{s.label}</option>)}
+          <select className="input py-1.5 text-sm w-48 bg-slate-50 border-slate-200" value={bulkStatus} onChange={e => setBulkStatus(e.target.value)}>
+            <option value="" className="text-slate-600">Change status to…</option>
+            {stages.map(s => <option key={s.name} value={s.name} className={STATUS_COLORS[s.name]?.split(' ')[1] || 'text-slate-600'}>{s.label}</option>)}
           </select>
           <button onClick={applyBulkStatus} disabled={!bulkStatus || applyingBulk} className="btn btn-primary py-1.5 text-sm">
             {applyingBulk ? <Loader2 size={14} className="animate-spin" /> : 'Apply'}
@@ -355,27 +443,36 @@ export default function LeadsTable() {
         <div className="p-4 border-b border-slate-100 space-y-3">
           <div className="flex flex-col md:flex-row md:items-center gap-3">
             <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-              <input type="text" placeholder="Search by name, phone, or category..." className="input pl-10 w-full" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 md:w-[18px] md:h-[18px] w-4 h-4" />
+              <input type="text" placeholder="Search by name, phone, or category..." className="input pl-9 md:pl-10 w-full py-1.5 md:py-2 text-sm" value={searchInput} onChange={e => setSearchInput(e.target.value)} />
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Filter size={18} className="text-slate-400 shrink-0" />
-              <select className="input w-44" value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1); syncURL({ status: e.target.value, page: 1 }); }}>
-                <option value="">All Status</option>
-                {stages.map(s => <option key={s.name} value={s.name}>{s.label}</option>)}
+            <div className="grid grid-cols-2 md:flex md:flex-wrap md:items-center gap-2">
+              <Filter size={18} className="text-slate-400 shrink-0 hidden md:block" />
+              <select 
+                className={`input w-full md:w-44 font-medium transition-colors text-sm py-1.5 md:py-2 focus:ring-1 ${statusFilter && STATUS_COLORS[statusFilter] ? STATUS_COLORS[statusFilter] + ' border-transparent' : 'bg-fuchsia-50 hover:bg-fuchsia-100 border-fuchsia-200 text-fuchsia-900 focus:ring-fuchsia-500'}`} 
+                value={statusFilter} 
+                onChange={e => { setStatusFilter(e.target.value); setPage(1); syncURL({ status: e.target.value, page: 1 }); }}
+              >
+                <option value="" className="text-slate-600">All Status</option>
+                {stages.map(s => <option key={s.name} value={s.name} className={`font-bold ${STATUS_COLORS[s.name]?.split(' ')[1] || 'text-slate-600'}`}>{s.label}</option>)}
               </select>
-              <select className="input w-40" value={cityFilter} onChange={e => { setCityFilter(e.target.value); setPage(1); syncURL({ city: e.target.value, page: 1 }); }}>
-                <option value="">All Cities</option>
-                {cities.map(c => <option key={c} value={c}>{c}</option>)}
+              <select className="input w-full md:w-40 bg-sky-50 hover:bg-sky-100 border-sky-200 text-sky-900 focus:ring-sky-500 transition-colors text-sm py-1.5 md:py-2" value={cityFilter} onChange={e => { setCityFilter(e.target.value); setPage(1); syncURL({ city: e.target.value, page: 1 }); }}>
+                <option value="" className="text-slate-600">All Cities</option>
+                {cities.map(c => <option key={c} value={c} className="text-sky-700 font-medium">{c}</option>)}
               </select>
-              <select className="input w-44" value={calledByFilter} onChange={e => { setCalledByFilter(e.target.value); setPage(1); syncURL({ called_by: e.target.value, page: 1 }); }}>
-                <option value="">All Teammates</option>
-                {teammates.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+              <select className="input w-full md:w-40 bg-indigo-50 hover:bg-indigo-100 border-indigo-200 text-indigo-900 focus:ring-indigo-500 transition-colors text-sm py-1.5 md:py-2" value={assignedToFilter} onChange={e => { setAssignedToFilter(e.target.value); setPage(1); syncURL({ assigned_to: e.target.value, page: 1 }); }}>
+                <option value="" className="text-slate-600">All Assigned</option>
+                <option value="unassigned" className="text-indigo-700 font-medium">Unassigned</option>
+                {teammates.map(u => <option key={u.id} value={u.id} className="text-indigo-700 font-medium">{u.name}</option>)}
+              </select>
+              <select className="input w-full md:w-40 bg-emerald-50 hover:bg-emerald-100 border-emerald-200 text-emerald-900 focus:ring-emerald-500 transition-colors text-sm py-1.5 md:py-2" value={calledByFilter} onChange={e => { setCalledByFilter(e.target.value); setPage(1); syncURL({ called_by: e.target.value, page: 1 }); }}>
+                <option value="" className="text-slate-600">All Callers</option>
+                {teammates.map(u => <option key={u.id} value={u.id} className="text-emerald-700 font-medium">{u.name}</option>)}
               </select>
             </div>
           </div>
           {/* Date range filter */}
-          <div className="flex flex-wrap items-center gap-2 text-sm">
+          <div className="hidden md:flex flex-wrap items-center gap-2 text-sm">
             <Calendar size={16} className="text-slate-400" />
             <span className="text-slate-500 text-xs font-medium">Added between:</span>
             <input type="date" className="input py-1.5 text-sm w-40" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPage(1); }} />
@@ -408,7 +505,7 @@ export default function LeadsTable() {
                 <th className="px-6 py-4 text-xs font-bold text-black uppercase tracking-wider cursor-pointer select-none" onClick={() => toggleSort('created_at')}>
                   <div className="flex items-center gap-1">Added <SortIcon col="created_at" /></div>
                 </th>
-                <th className="px-6 py-4 text-xs font-bold text-black uppercase tracking-wider">Called By</th>
+                <th className="px-6 py-4 text-xs font-bold text-black uppercase tracking-wider">Assigned To</th>
                 <th className="px-6 py-4 text-xs font-bold text-black uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
@@ -468,11 +565,11 @@ export default function LeadsTable() {
                     <div className="flex flex-col gap-1">
                       <StatusBadge status={lead.status} />
                       <select
-                        className="text-xs text-black font-bold bg-transparent border-none focus:ring-0 p-0 cursor-pointer mt-1"
+                        className={`text-xs font-bold bg-transparent border-none focus:ring-0 p-0 cursor-pointer mt-1 ${STATUS_COLORS[lead.status]?.split(' ')[1] || 'text-slate-600'}`}
                         value={lead.status}
                         onChange={(e) => updateStatus(lead.id, e.target.value)}
                       >
-                        {stages.map(s => <option key={s.name} value={s.name}>{s.label}</option>)}
+                        {stages.map(s => <option key={s.name} value={s.name} className={`font-bold ${STATUS_COLORS[s.name]?.split(' ')[1] || 'text-slate-600'}`}>{s.label}</option>)}
                       </select>
                     </div>
                   </td>
@@ -481,12 +578,7 @@ export default function LeadsTable() {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex flex-col">
-                      <span className="text-xs font-bold text-indigo-600">{lead.last_called_by_name || '-'}</span>
-                      {lead.last_called && (
-                        <span className="text-[10px] text-slate-400">
-                          {new Date(lead.last_called).toLocaleDateString()}
-                        </span>
-                      )}
+                      <span className="text-sm font-bold text-indigo-700">{lead.assigned_to_name || <span className="text-slate-400 font-normal italic">Unassigned</span>}</span>
                     </div>
                   </td>
                   <td className="px-6 py-4">
@@ -509,7 +601,7 @@ export default function LeadsTable() {
         <div className="lg:hidden divide-y divide-slate-100">
           {loading ? (
             [1,2,3,4,5].map(i => (
-              <div key={i} className="p-4 animate-pulse space-y-3">
+              <div key={i} className="p-3 animate-pulse space-y-2">
                 <div className="h-5 bg-slate-100 rounded w-1/2" />
                 <div className="h-4 bg-slate-100 rounded w-3/4" />
               </div>
@@ -517,27 +609,49 @@ export default function LeadsTable() {
           ) : leads.length === 0 ? (
             <div className="p-8 text-center text-slate-500">No leads found.</div>
           ) : leads.map((lead) => (
-            <div key={lead.id} className={`p-4 transition-colors ${selectedIds.has(lead.id) ? 'bg-indigo-50/50' : 'hover:bg-slate-50'}`}>
-              <div className="flex items-start gap-3 mb-3">
-                <input type="checkbox" className="rounded mt-1" checked={selectedIds.has(lead.id)} onChange={() => toggleSelect(lead.id)} />
-                <div className="flex-1 min-w-0">
-                  <Link to={`/leads/${lead.id}`} className="font-bold text-black block">{lead.name}</Link>
-                  <span className="text-xs text-black font-medium">{lead.main_category}</span>
-                </div>
-                <StatusBadge status={lead.status} />
-              </div>
-              <div className="flex items-center justify-between pl-7">
-                <div className="flex items-center gap-2">
-                  {lead.phone && <a href={`tel:${lead.phone}`} className="w-9 h-9 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center"><Phone size={16} /></a>}
-                  {lead.phone && <WhatsAppButton phone={lead.phone} name={lead.name} />}
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold text-black whitespace-nowrap">{lead.phone}</span>
-                    <div className="flex items-center gap-1 text-[10px] text-amber-500 font-bold"><Star size={10} className="fill-amber-500" />{lead.rating}</div>
+            <div key={lead.id} className={`p-3 transition-colors ${selectedIds.has(lead.id) ? 'bg-indigo-50/50' : 'hover:bg-slate-50'}`}>
+              <div className="flex items-start gap-2.5">
+                <input type="checkbox" className="rounded mt-0.5 shrink-0" checked={selectedIds.has(lead.id)} onChange={() => toggleSelect(lead.id)} />
+                <div className="flex-1 min-w-0 space-y-2">
+                  {/* Header: Name, Category, Assigned */}
+                  <div>
+                    <Link to={`/leads/${lead.id}`} className="font-bold text-black block truncate text-sm">{lead.name}</Link>
+                    <div className="flex items-center justify-between mt-0.5">
+                      <span className="text-[11px] text-slate-500 font-medium">{lead.main_category}</span>
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded-full">
+                        {lead.assigned_to_name || 'Unassigned'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Body: Contact */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      {lead.phone && <a href={`tel:${lead.phone}`} className="w-7 h-7 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center shrink-0"><Phone size={12} /></a>}
+                      {lead.phone && <WhatsAppButton phone={lead.phone} name={lead.name} small={true} />}
+                      <div className="flex flex-col">
+                        <span className="text-xs font-bold text-black">{lead.phone || 'No phone'}</span>
+                        {lead.rating > 0 && <div className="flex items-center gap-1 text-[10px] text-amber-500 font-bold"><Star size={10} className="fill-amber-500" />{lead.rating}</div>}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Footer: Status select & Actions */}
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                    <div className="flex flex-col w-1/2">
+                      <select
+                        className={`text-[11px] font-bold bg-transparent border-none focus:ring-0 p-0 cursor-pointer w-full ${STATUS_COLORS[lead.status]?.split(' ')[1] || 'text-slate-600'}`}
+                        value={lead.status}
+                        onChange={(e) => updateStatus(lead.id, e.target.value)}
+                      >
+                        {stages.map(s => <option key={s.name} value={s.name} className={`font-bold ${STATUS_COLORS[s.name]?.split(' ')[1] || 'text-slate-600'}`}>{s.label}</option>)}
+                      </select>
+                    </div>
+                    <Link to={`/leads/${lead.id}`} className="text-indigo-600 text-[11px] font-bold hover:text-indigo-800 flex items-center gap-1 bg-indigo-50 px-2 py-1.5 rounded-lg active:scale-95 transition-transform">
+                      Details <ChevronRightIcon size={12} />
+                    </Link>
                   </div>
                 </div>
-                <Link to={`/leads/${lead.id}`} className="p-2 text-slate-400">
-                  <ChevronRightIcon size={20} />
-                </Link>
               </div>
             </div>
           ))}
@@ -546,7 +660,7 @@ export default function LeadsTable() {
         {/* Pagination */}
         <div className="p-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-4">
           <p className="text-sm text-slate-500">
-            Showing <span className="font-bold text-slate-900">{Math.min((page - 1) * pageSize + 1, total)}–{Math.min(page * pageSize, total)}</span> of <span className="font-bold text-slate-900">{total.toLocaleString()}</span> leads
+            Showing <span className="font-bold text-slate-900">{Math.min((page - 1) * pageSize + 1, total || 0)}–{Math.min(page * pageSize, total || 0)}</span> of <span className="font-bold text-slate-900">{(total || 0).toLocaleString()}</span> leads
           </p>
           <div className="flex items-center gap-2">
             <button disabled={page <= 1} onClick={() => { setPage(1); syncURL({ page: 1 }); }} className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50 text-xs px-3">«</button>

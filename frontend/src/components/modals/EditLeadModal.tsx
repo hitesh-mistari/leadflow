@@ -135,6 +135,7 @@ export default function EditLeadModal({ lead, onClose, onSuccess }: EditLeadModa
                                         <>
                                             <option value="not_called">Not Called</option>
                                             <option value="called_no_response">Called (No Response)</option>
+                                            <option value="called_busy">Called (Busy)</option>
                                             <option value="follow_up">Follow Up</option>
                                             <option value="interested">Interested</option>
                                             <option value="converted">Converted</option>
