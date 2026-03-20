@@ -519,15 +519,19 @@ export default function LeadsTable() {
                 <option value="" className="text-slate-600">All Cities</option>
                 {cities.map(c => <option key={c} value={c} className="text-sky-700 font-medium">{c}</option>)}
               </select>
-              <select className="input w-full md:w-40 bg-indigo-50 hover:bg-indigo-100 border-indigo-200 text-indigo-900 focus:ring-indigo-500 transition-colors text-sm py-1.5 md:py-2" value={assignedToFilter} onChange={e => { setAssignedToFilter(e.target.value); setPage(1); syncURL({ assigned_to: e.target.value, page: 1 }); }}>
-                <option value="" className="text-slate-600">All Assigned</option>
-                <option value="unassigned" className="text-indigo-700 font-medium">Unassigned</option>
-                {teammates.map(u => <option key={u.id} value={u.id} className="text-indigo-700 font-medium">{u.name}</option>)}
-              </select>
-              <select className="input w-full md:w-40 bg-emerald-50 hover:bg-emerald-100 border-emerald-200 text-emerald-900 focus:ring-emerald-500 transition-colors text-sm py-1.5 md:py-2" value={calledByFilter} onChange={e => { setCalledByFilter(e.target.value); setPage(1); syncURL({ called_by: e.target.value, page: 1 }); }}>
-                <option value="" className="text-slate-600">All Callers</option>
-                {teammates.map(u => <option key={u.id} value={u.id} className="text-emerald-700 font-medium">{u.name}</option>)}
-              </select>
+              {user?.role !== 'member' && (
+                <>
+                  <select className="input w-full md:w-40 bg-indigo-50 hover:bg-indigo-100 border-indigo-200 text-indigo-900 focus:ring-indigo-500 transition-colors text-sm py-1.5 md:py-2" value={assignedToFilter} onChange={e => { setAssignedToFilter(e.target.value); setPage(1); syncURL({ assigned_to: e.target.value, page: 1 }); }}>
+                    <option value="" className="text-slate-600">All Assigned</option>
+                    <option value="unassigned" className="text-indigo-700 font-medium">Unassigned</option>
+                    {teammates.map(u => <option key={u.id} value={u.id} className="text-indigo-700 font-medium">{u.name}</option>)}
+                  </select>
+                  <select className="input w-full md:w-40 bg-emerald-50 hover:bg-emerald-100 border-emerald-200 text-emerald-900 focus:ring-emerald-500 transition-colors text-sm py-1.5 md:py-2" value={calledByFilter} onChange={e => { setCalledByFilter(e.target.value); setPage(1); syncURL({ called_by: e.target.value, page: 1 }); }}>
+                    <option value="" className="text-slate-600">All Callers</option>
+                    {teammates.map(u => <option key={u.id} value={u.id} className="text-emerald-700 font-medium">{u.name}</option>)}
+                  </select>
+                </>
+              )}
             </div>
           </div>
           {/* Date range filter */}

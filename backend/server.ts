@@ -396,7 +396,7 @@ app.post('/api/stages', authenticateToken, async (req, res) => {
 
 // ─── Lead Routes ───────────────────────────────────────────────────────────────
 // Get Leads (paginated / filtered / sorted)
-app.get('/api/leads', authenticateToken, async (req, res) => {
+app.get('/api/leads', authenticateToken, async (req: any, res: any) => {
     try {
         const {
             page = 1, limit = 10, search, status, city, called_by, assigned_to,
@@ -446,7 +446,13 @@ app.get('/api/leads', authenticateToken, async (req, res) => {
             paramIndex++;
         }
 
-        if (assigned_to) {
+        // Secure Role-Based Visibility
+        if (req.user.role === 'member') {
+            query += ` AND l.assigned_to = $${paramIndex}`;
+            countQuery += ` AND assigned_to = $${paramIndex}`;
+            params.push(req.user.id);
+            paramIndex++;
+        } else if (assigned_to) {
             if (assigned_to === 'unassigned') {
                 query += ` AND l.assigned_to IS NULL`;
                 countQuery += ` AND assigned_to IS NULL`;
@@ -507,13 +513,20 @@ app.get('/api/test', (req, res) => {
 });
 
 // Export Leads
-app.get('/api/leads/export', authenticateToken, async (req, res) => {
+app.get('/api/leads/export', authenticateToken, async (req: any, res: any) => {
     try {
         const { search, status, city, format = 'csv' } = req.query;
 
         let query = 'SELECT name, phone, email, city, status, rating, reviews, main_category, address, website, created_at, notes FROM leads WHERE 1=1';
         const params: any[] = [];
         let paramIndex = 1;
+
+        // Secure Role-Based Visibility
+        if (req.user?.role === 'member') {
+            query += ` AND assigned_to = $${paramIndex}`;
+            params.push(req.user.id);
+            paramIndex++;
+        }
 
         if (status) {
             query += ` AND status = $${paramIndex}`;
